@@ -13,19 +13,15 @@ final class AuthCredential: Model, Content {
     @Field(key: "password_hash")
     var passwordHash: String
 
-    @Field(key: "salt")
-    var salt: String
-
     @Parent(key: "user_id")
     var user: User
 
     init() {}
 
-    init(id: UUID? = nil, login: String, passwordHash: String, salt: String, userID: UUID) {
+    init(id: UUID? = nil, login: String, passwordHash: String, userID: UUID) {
         self.id = id
         self.login = login
         self.passwordHash = passwordHash
-        self.salt = salt
         self.$user.id = userID
     }
 }

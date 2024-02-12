@@ -1,8 +1,14 @@
-//
-//  File.swift
-//  
-//
-//  Created by Vladislav Sosin on 31.01.2024.
-//
+import Fluent
 
-import Foundation
+struct CreateSkill: Migration {
+    func prepare(on database: Database) -> EventLoopFuture<Void> {
+        database.schema("skills")
+            .id()
+            .field("name", .string, .required)
+            .create()
+    }
+
+    func revert(on database: Database) -> EventLoopFuture<Void> {
+        database.schema("skills").delete()
+    }
+}

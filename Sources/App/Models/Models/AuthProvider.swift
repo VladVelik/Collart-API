@@ -12,16 +12,20 @@ final class AuthProvider: Model, Content {
 
     @Field(key: "access_token")
     var accessToken: String
+    
+    @Field(key: "salt")
+    var salt: String
 
     @Parent(key: "user_id")
     var user: User
 
     init() {}
 
-    init(id: UUID? = nil, provider: String, accessToken: String, userID: UUID) {
+    init(id: UUID? = nil, provider: String, accessToken: String, salt: String, userID: UUID) {
         self.id = id
         self.provider = provider
         self.accessToken = accessToken
+        self.salt = salt
         self.$user.id = userID
     }
 }

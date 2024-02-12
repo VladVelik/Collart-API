@@ -33,6 +33,12 @@ final class Order: Model, Content {
 
     @Field(key: "is_active")
     var isActive: Bool
+    
+    @Siblings(through: OrderTool.self, from: \.$order, to: \.$tool)
+    var tools: [Tool]
+    
+    @Siblings(through: OrderParticipant.self, from: \.$order, to: \.$user)
+    var participants: [User]
 
     init() {}
 

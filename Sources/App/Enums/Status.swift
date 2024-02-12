@@ -1,8 +1,12 @@
-//
-//  File.swift
-//  
-//
-//  Created by Vladislav Sosin on 31.01.2024.
-//
+import Fluent
+import Vapor
 
-import Foundation
+enum Status: String, Codable {
+    case rejected
+    case active
+    case accepted
+}
+
+extension Status {
+    static let name: String = "status"
+}

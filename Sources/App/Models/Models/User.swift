@@ -20,10 +20,10 @@ final class User: Model, Content {
     var description: String
     
     @Field(key: "user_photo")
-    var userPhoto: URL
+    var userPhoto: String
     
     @Field(key: "cover")
-    var cover: URL
+    var cover: String
     
     @Field(key: "searchable")
     var searchable: Bool
@@ -55,6 +55,15 @@ final class User: Model, Content {
     @Siblings(through: UserSkill.self, from: \.$user, to: \.$skill)
     var skills: [Skill]
     
+    @Children(for: \.$sender)
+    var initiatedInteractions: [Interaction]
+    
+    @Children(for: \.$getter)
+    var receivedInteractions: [Interaction]
+    
+    @Siblings(through: OrderParticipant.self, from: \.$user, to: \.$order)
+    var participatingOrders: [Order]
+    
     init() {}
     
     init(
@@ -63,8 +72,8 @@ final class User: Model, Content {
         name: String,
         surname: String,
         description: String,
-        userPhoto: URL,
-        cover: URL,
+        userPhoto: String,
+        cover: String,
         searchable: Bool,
         experience: ExperienceType
     ) {
@@ -79,3 +88,35 @@ final class User: Model, Content {
         self.experience = experience
     }
 }
+
+extension User: Authenticatable {}
+
+extension User {
+    struct Public: Content {
+        let id: UUID?
+        let email: String
+        let name: String
+        let surname: String
+        let description: String
+        let userPhoto: String
+        let cover: String
+        let searchable: Bool
+        let experience: ExperienceType
+    }
+
+    func asPublic() -> Public {
+        return Public(
+            id: self.id,
+            email: self.email,
+            name: self.name,
+            surname: self.surname,
+            description: self.description,
+            userPhoto: self.userPhoto,
+            cover: self.cover,
+            searchable: self.searchable,
+            experience: self.experience
+        )
+    }
+}
+
+

@@ -1,15 +1,13 @@
-//
-//  File.swift
-//  
-//
-//  Created by Vladislav Sosin on 30.01.2024.
-//
-
+import Fluent
 import Vapor
 
 enum ExperienceType: String, Codable {
-    case noExperience = "no experience"
-    case oneToThreeYears = "1-3 years"
-    case threeToFiveYears = "3-5 years"
-    case moreThanFiveYears = "more than 5 years"
+    case noExperience = "no_experience"
+    case oneToThreeYears = "1-3_years"
+    case threeToFiveYears = "3-5_years"
+    case moreThanFiveYears = "more_than_5_years"
+}
+
+extension ExperienceType {
+    static let name: String = "experience_type"
 }

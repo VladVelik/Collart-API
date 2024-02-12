@@ -1,8 +1,15 @@
-//
-//  File.swift
-//  
-//
-//  Created by Vladislav Sosin on 31.01.2024.
-//
+import Fluent
 
-import Foundation
+struct CreateUserSkill: Migration {
+    func prepare(on database: Database) -> EventLoopFuture<Void> {
+        database.schema("user_skill")
+            .id()
+            .field("user_id", .uuid, .required, .references("users", "id"))
+            .field("skill_id", .uuid, .required, .references("skills", "id"))
+            .create()
+    }
+
+    func revert(on database: Database) -> EventLoopFuture<Void> {
+        database.schema("user_skill").delete()
+    }
+}

@@ -1,8 +1,13 @@
-//
-//  File.swift
-//  
-//
-//  Created by Vladislav Sosin on 30.01.2024.
-//
+import Fluent
+import Vapor
 
-import Foundation
+enum TabType: String, Codable {
+    case portfolio = "portfolio"
+    case active = "active"
+    case collaborations = "collaborations"
+    case favorite = "favorite"
+}
+
+extension TabType {
+    static let name: String = "tab_type"
+}

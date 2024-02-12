@@ -1,8 +1,22 @@
-//
-//  File.swift
-//  
-//
-//  Created by Vladislav Sosin on 31.01.2024.
-//
+import Fluent
 
-import Foundation
+struct CreateOrder: Migration {
+    func prepare(on database: Database) -> EventLoopFuture<Void> {
+        database.schema("orders")
+            .id()
+            .field("owner_id", .uuid, .required, .references("users", "id"))
+            .field("title", .string, .required)
+            .field("image", .string, .required)
+            .field("task_description", .string, .required)
+            .field("project_description", .string, .required)
+            .field("experience", .string, .required)
+            .field("data_start", .datetime, .required)
+            .field("data_end", .datetime, .required)
+            .field("is_active", .bool, .required)
+            .create()
+    }
+    
+    func revert(on database: Database) -> EventLoopFuture<Void> {
+        database.schema("orders").delete()
+    }
+}
