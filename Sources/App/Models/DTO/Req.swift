@@ -32,3 +32,7 @@ struct GoogleUserInfo {
     let name: String
     let picture: String
 }
+
+struct UpdatePhotoData: Content {
+    let photoURL: String
+}

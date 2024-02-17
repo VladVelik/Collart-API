@@ -32,6 +32,7 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(CreateOrderParticipant())
     
     app.jwt.signers.use(.hs256(key: "SECRET_KEY"))
+    app.routes.defaultMaxBodySize = "10mb"
     
     try await app.autoMigrate().get()
 
