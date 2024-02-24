@@ -18,7 +18,8 @@ func routes(_ app: Application) throws {
     protected.get("protectedRoute", use: protectedHandler)
     
     try app.register(collection: UserController())
-
+    try app.register(collection: ProjectController())
+    try app.register(collection: OrderController())
 }
 
 func protectedHandler(req: Request) throws -> String {

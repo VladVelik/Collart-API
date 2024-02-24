@@ -10,17 +10,18 @@ final class Tab: Model, Content {
     @Parent(key: "user_id")
     var user: User
 
-    @Enum(key: "type")
-    var type: TabType
+    @Field(key: "project_id")
+    var projectID: UUID
 
-    @Children(for: \.$tab)
-    var projects: [PortfolioProject]
+    @Enum(key: "tab_type")
+    var tabType: TabType
 
     init() {}
 
-    init(id: UUID? = nil, userID: UUID, type: TabType) {
+    init(id: UUID? = nil, userID: UUID, projectID: UUID, tabType: TabType) {
         self.id = id
         self.$user.id = userID
-        self.type = type
+        self.projectID = projectID
+        self.tabType = tabType
     }
 }

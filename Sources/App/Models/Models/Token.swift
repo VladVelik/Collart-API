@@ -1,4 +1,3 @@
-
 import Vapor
 import JWT
 
@@ -12,7 +11,6 @@ struct TokenPayload: JWTPayload, Authenticatable {
     let exp: ExpirationClaim
 
     func verify(using signer: JWTSigner) throws {
-
         try exp.verifyNotExpired()
     }
 }

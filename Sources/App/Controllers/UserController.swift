@@ -2,6 +2,12 @@ import Vapor
 import Fluent
 
 struct UserController: RouteCollection {
+    let cloudinaryService = CloudinaryService(
+        cloudName: "dwkprbrad",
+        apiKey: "571257446453121",
+        apiSecret: "tgoQJ4AKmlCihUe3t_oImnXTGDM"
+    )
+    
     func boot(routes: RoutesBuilder) throws {
         let usersRoute = routes.grouped("users")
         usersRoute.post(use: create)
@@ -9,8 +15,21 @@ struct UserController: RouteCollection {
         usersRoute.put(":userID", use: update)
         usersRoute.delete(":userID", use: delete)
         let tokenProtected = usersRoute.grouped(JWTMiddleware())
-        tokenProtected.post(":userID", "photo", use: uploadPhoto)
-        tokenProtected.delete("photo", ":publicId", use: deletePhoto)
+        tokenProtected.post(":userID", "photo", use: { req in
+            try self.uploadImage(req: req, imageType: .photo)
+        })
+        tokenProtected.delete("photo", ":publicId", use: { req in
+            try self.deleteImage(req: req, imageType: .photo)
+        })
+        tokenProtected.post(":userID", "cover", use: { req in
+            try self.uploadImage(req: req, imageType: .cover)
+        })
+        tokenProtected.delete("cover", ":publicId", use: { req in
+            try self.deleteImage(req: req, imageType: .cover)
+        })
+        
+        tokenProtected.get("skills", use: getUserSkills)
+        tokenProtected.put("updateUser", use: updateUser)
     }
     
     func create(req: Request) throws -> EventLoopFuture<User> {
@@ -47,152 +66,126 @@ struct UserController: RouteCollection {
             }.transform(to: .noContent)
     }
     
-    func uploadPhoto(req: Request) throws -> EventLoopFuture<User.Public> {
+    func uploadImage(req: Request, imageType: ImageType) throws -> EventLoopFuture<User.Public> {
         let userID = try req.parameters.require("userID", as: UUID.self)
         
         let input = try req.content.decode(FileUpload.self)
         
-        return try self.uploadImageToCloudinary(file: input.file, on: req).flatMap { imageUrl in
+        return try cloudinaryService.upload(file: input.file, on: req).flatMap { imageUrl in
             return User.find(userID, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
-                user.userPhoto = imageUrl
+                switch imageType {
+                case .photo:
+                    user.userPhoto = imageUrl
+                case .cover:
+                    user.cover = imageUrl
+                }
                 return user.save(on: req.db).map { user.asPublic() }
             }
         }
     }
     
-    func deletePhoto(req: Request) throws -> EventLoopFuture<HTTPStatus> {
+    func deleteImage(req: Request, imageType: ImageType) throws -> EventLoopFuture<HTTPStatus> {
         guard let publicId = req.parameters.get("publicId") else {
             throw Abort(.badRequest, reason: "Missing publicId")
         }
         let userID = try req.auth.require(User.self).requireID()
-        return try deleteImageFromCloudinary(publicId: publicId, on: req).flatMap { status in
+        return try cloudinaryService.delete(publicId: publicId, on: req).flatMap { status in
             // После успешного удаления изображения, ищем пользователя и обновляем его запись
             User.find(userID, on: req.db).flatMap { user in
                 guard let user = user else {
                     return req.eventLoop.makeFailedFuture(Abort(.notFound, reason: "User not found"))
                 }
-                // Здесь вы можете решить, удалять ли запись пользователя, или обновлять поле userPhoto
-                // Например, для обновления userPhoto:
-                user.userPhoto = ""
+                switch imageType {
+                case .photo:
+                    user.userPhoto = ""
+                case .cover:
+                    user.cover = ""
+                }
                 return user.save(on: req.db).transform(to: .ok)
             }
         }
     }
     
-    func uploadImageToCloudinary(file: File, on req: Request) throws -> EventLoopFuture<String> {
-        let cloudName = "dwkprbrad"
-        let apiKey = "571257446453121"
-        let apiSecret = "tgoQJ4AKmlCihUe3t_oImnXTGDM"
-        let timestamp = "\(Int(Date().timeIntervalSince1970))"
-        
-        let paramsToSign = [
-            "timestamp": "\(timestamp)"
-        ]
-        
-        // Генерация подписи
-        let signature = try generateSignature(params: paramsToSign, apiSecret: apiSecret)
-        
-        // URL для загрузки
-        let url = URI(string: "https://api.cloudinary.com/v1_1/\(cloudName)/image/upload")
-        
-        // Создание границы и заголовков
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var headers = HTTPHeaders()
-        headers.add(name: .contentType, value: "multipart/form-data; boundary=\(boundary)")
-        
-        // Создание тела запроса
-        var body = ByteBufferAllocator().buffer(capacity: 0)
-        appendPart(name: "file", filename: file.filename, fileData: file.data, boundary: boundary, to: &body)
-        appendPart(name: "api_key", value: apiKey, boundary: boundary, to: &body)
-        appendPart(name: "timestamp", value: "\(timestamp)", boundary: boundary, to: &body)
-        appendPart(name: "signature", value: signature, boundary: boundary, to: &body)
-        body.writeString("--\(boundary)--\r\n")
-        
-        // Отправка запроса
-        return req.client.post(url, headers: headers) { req in
-            req.body = .init(buffer: body)
-        }.flatMapThrowing { res in
-            guard let body = res.body else {
-                throw Abort(.internalServerError, reason: "Invalid response from Cloudinary")
+    func getUserSkills(_ req: Request) throws -> EventLoopFuture<[Skill]> {
+        // Извлекаем идентификатор пользователя из токена
+        let userID = try req.auth.require(User.self).requireID()
+
+        // Запрашиваем все UserSkill для этого пользователя
+        return UserSkill.query(on: req.db)
+            .filter(\.$user.$id == userID)
+            .all()
+            .flatMap { userSkills in
+                // Извлекаем идентификаторы навыков из UserSkill
+                let skillIDs = userSkills.map { $0.$skill.id }
+
+                // Запрашиваем навыки по этим идентификаторам
+                return Skill.query(on: req.db)
+                    .filter(\.$id ~~ skillIDs)
+                    .all()
             }
-            let data = Data(buffer: body)
-            //                // Попытка преобразования Data в String для логирования
-            if let bodyString = String(data: data, encoding: .utf8) {
-                print("Cloudinary response: \(bodyString)")
-            }
-            let cloudinaryResponse = try JSONDecoder().decode(CloudinaryUploadResponse.self, from: body)
-            return cloudinaryResponse.url
+    }
+    
+    func updateUser(req: Request) throws -> EventLoopFuture<HTTPStatus> {
+        let updateUserRequest = try req.content.decode(UpdateUserRequest.self)
+        
+        // Извлечение идентификатора пользователя из JWT
+        let userID = try req.auth.require(User.self).requireID()
+
+        // Начало транзакции для обновления данных пользователя и его учетных данных
+        return req.db.transaction { db in
+            User.find(userID, on: db)
+                .unwrap(or: Abort(.notFound))
+                .flatMap { user in
+                    var updateLogin = false // Флаг, указывающий на необходимость обновления логина
+
+                    if let email = updateUserRequest.email, !email.isEmpty {
+                        user.email = email
+                        updateLogin = true // Нужно обновить логин в AuthCredential
+                    }
+                    if let name = updateUserRequest.name, !name.isEmpty { user.name = name }
+                    if let surname = updateUserRequest.surname, !surname.isEmpty { user.surname = surname }
+                    if let description = updateUserRequest.description, !description.isEmpty { user.description = description }
+                    if let searchable = updateUserRequest.searchable { user.searchable = searchable }
+                    if let experience = updateUserRequest.experience { user.experience = experience }
+
+                    // Сохранение обновленных данных пользователя
+                    return user.save(on: db).flatMap {
+                        // Если нужно обновить логин
+                        if updateLogin {
+                            return AuthCredential.query(on: db)
+                                .filter(\.$user.$id == userID)
+                                .first()
+                                .unwrap(or: Abort(.notFound))
+                                .flatMap { authCredential in
+                                    authCredential.login = user.email // Обновление логина
+                                    return authCredential.save(on: db)
+                                }
+                        } else {
+                            return db.eventLoop.makeSucceededFuture(())
+                        }
+                    }.flatMap {
+                        // Обновление пароля пользователя, если он был предоставлен
+                        if let password = updateUserRequest.passwordHash, let confirmPassword = updateUserRequest.confirmPasswordHash, !password.isEmpty, password == confirmPassword {
+                            return AuthCredential.query(on: db)
+                                .filter(\.$user.$id == userID)
+                                .first()
+                                .unwrap(or: Abort(.notFound))
+                                .flatMap { authCredential in
+                                    do {
+                                        let hashedPassword = try Bcrypt.hash(password)
+                                        authCredential.passwordHash = hashedPassword
+                                        return authCredential.save(on: db).transform(to: .ok)
+                                    } catch {
+                                        return db.eventLoop.makeFailedFuture(Abort(.internalServerError, reason: "Failed to hash password"))
+                                    }
+                                }
+                        } else {
+                            return db.eventLoop.makeSucceededFuture(.ok)
+                        }
+                    }
+                }
         }
     }
-    
-    func deleteImageFromCloudinary(publicId: String, on req: Request) throws -> EventLoopFuture<HTTPStatus> {
-        let cloudName = "dwkprbrad"
-        let apiKey = "571257446453121"
-        let apiSecret = "tgoQJ4AKmlCihUe3t_oImnXTGDM"
-        
-        let url = URI(string: "https://api.cloudinary.com/v1_1/\(cloudName)/image/destroy")
-        
-        let paramsToSign = [
-            "public_id": publicId,
-            "timestamp": "\(Int(Date().timeIntervalSince1970))"
-        ]
-        
-        let signature = try generateSignature(params: paramsToSign, apiSecret: apiSecret)
-        
-        var headers = HTTPHeaders()
-        headers.add(name: .contentType, value: "application/x-www-form-urlencoded")
-        
-        let body: [String: String] = [
-            "public_id": publicId,
-            "timestamp": paramsToSign["timestamp"]!,
-            "api_key": apiKey,
-            "signature": signature
-        ]
-        
-        let bodyString = body.map { "\($0)=\($1)" }.joined(separator: "&")
-        
-        return req.client.post(url, headers: headers) { req in
-            req.body = .init(string: bodyString)
-        }.flatMapThrowing { res in
-            guard res.status == .ok else {
-                throw Abort(.internalServerError, reason: "Failed to delete image from Cloudinary")
-            }
-            return res.status
-        }
-    }
-    
-    func appendPart(name: String, filename: String? = nil, fileData: ByteBuffer, boundary: String, to body: inout ByteBuffer) {
-        let disposition = filename != nil ? "form-data; name=\"\(name)\"; filename=\"\(filename!)\"" : "form-data; name=\"\(name)\""
-        let partHeader = "--\(boundary)\r\nContent-Disposition: \(disposition)\r\n\r\n"
-        body.writeString(partHeader)
-        var fileData = fileData // Создаем копию, так как writeBuffer принимает inout параметр
-        body.writeBuffer(&fileData)
-        body.writeString("\r\n")
-    }
-    
-    func appendPart(name: String, value: String, boundary: String, to body: inout ByteBuffer) {
-        let partHeader = "--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n"
-        body.writeString(partHeader)
-        body.writeString(value)
-        body.writeString("\r\n")
-    }
-    
-    // Функция для генерации подписи
-    func generateSignature(params: [String: String], apiSecret: String) throws -> String {
-        let sortedParams = params.sorted { $0.0 < $1.0 }
-        let paramString = sortedParams.map { "\($0)=\($1)" }.joined(separator: "&")
-        let signString = paramString + apiSecret
-        
-        guard let data = signString.data(using: .utf8) else {
-            throw  Abort(.badRequest, reason: "Invalid response from Cloudinar")// Замените SomeError на фактическую ошибку, которую вы хотите использовать
-        }
-        
-        let digest = SHA256.hash(data: data)
-        let signature = digest.compactMap { String(format: "%02x", $0) }.joined()
-        
-        return signature
-    }
-    
 }
 
 struct FileUpload: Codable {

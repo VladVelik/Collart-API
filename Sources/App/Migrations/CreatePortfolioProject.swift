@@ -5,7 +5,7 @@ struct CreatePortfolioProject: Migration {
         database.schema("portfolio_projects")
             .id()
             .field("user_id", .uuid, .required, .references("users", "id"))
-            .field("tab_id", .uuid, .required, .references("tabs", "id"))
+            //.field("tab_id", .uuid, .required, .references("tabs", "id"))
             .field("name", .string, .required)
             .field("image", .string, .required)
             .field("description", .string, .required)

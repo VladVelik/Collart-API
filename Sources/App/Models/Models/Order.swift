@@ -14,7 +14,10 @@ final class Order: Model, Content {
     var title: String
 
     @Field(key: "image")
-    var image: URL
+    var image: String
+    
+    @Field(key: "skill")
+    var skill: UUID
 
     @Field(key: "task_description")
     var taskDescription: String
@@ -30,6 +33,9 @@ final class Order: Model, Content {
 
     @Field(key: "data_end")
     var dataEnd: Date
+    
+    @Field(key: "files")
+    var files: [String]
 
     @Field(key: "is_active")
     var isActive: Bool
@@ -46,23 +52,27 @@ final class Order: Model, Content {
         id: UUID? = nil,
         ownerID: UUID,
         title: String,
-        image: URL,
+        image: String,
+        skill: UUID,
         taskDescription: String,
         projectDescription: String,
         experience: ExperienceType,
         dataStart: Date,
         dataEnd: Date,
+        files: [String],
         isActive: Bool
     ) {
         self.id = id
         self.$owner.id = ownerID
         self.title = title
         self.image = image
+        self.skill = skill
         self.taskDescription = taskDescription
         self.projectDescription = projectDescription
         self.experience = experience
         self.dataStart = dataStart
         self.dataEnd = dataEnd
+        self.files = files
         self.isActive = isActive
     }
 }

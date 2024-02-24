@@ -24,7 +24,7 @@ struct AuthController: RouteCollection {
         return User.query(on: req.db)
             .filter(\.$email == createRequest.email)
             .first()
-            .flatMapThrowing() { existingUser in
+            .flatMapThrowing { existingUser in
                 guard existingUser == nil else {
                     throw Abort(.badRequest, reason: "User with this email already exists")
                 }
@@ -34,13 +34,28 @@ struct AuthController: RouteCollection {
                 
                 let hashedPassword = try Bcrypt.hash(createRequest.passwordHash)
                 
-                return user.save(on: req.db).flatMapThrowing() {
-                    // Здесь предполагаем, что createRequest.passwordHash уже является хешем пароля
-                    let credential = AuthCredential(
-                        login: createRequest.email,
-                        passwordHash: hashedPassword,
-                        userID: try user.requireID())
-                    return credential.save(on: req.db)
+                return user.save(on: req.db).flatMapThrowing { _ in
+                    Skill.query(on: req.db).filter(\.$nameRu ~~ createRequest.skills).all().flatMapThrowing { skills in
+                        // Убеждаемся, что все навыки найдены
+                        guard skills.count == createRequest.skills.count else {
+                            throw Abort(.badRequest, reason: "Some skills were not found")
+                        }
+                        
+                        let userSkills = try skills.map { skill -> UserSkill in
+                            return UserSkill(userID: try user.requireID(), skillID: try skill.requireID())
+                        }
+                        
+                        return userSkills.map { $0.save(on: req.db) }
+                            .flatten(on: req.eventLoop)
+                            .flatMapThrowing {
+                                // Создаем учетные данные для входа в систему
+                                let credential = AuthCredential(
+                                    login: createRequest.email,
+                                    passwordHash: hashedPassword,
+                                    userID: try user.requireID())
+                                return credential.save(on: req.db)
+                            }
+                    }
                 }
             }
             .transform(to: .created)
@@ -62,7 +77,7 @@ struct AuthController: RouteCollection {
                 return TokenResponse(token: token)
             }
     }
-
+    
     func generateToken(for user: User, req: Request) throws -> String {
         let payload = TokenPayload(userID: try user.requireID(), exp: ExpirationClaim(value: Date().addingTimeInterval(60 * 60 * 24 * 30)))
         return try req.jwt.sign(payload)
@@ -72,6 +87,4 @@ struct AuthController: RouteCollection {
         let user = try req.auth.require(User.self)
         return req.eventLoop.future(user.asPublic())
     }
-
-
 }

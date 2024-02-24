@@ -7,11 +7,13 @@ struct CreateOrder: Migration {
             .field("owner_id", .uuid, .required, .references("users", "id"))
             .field("title", .string, .required)
             .field("image", .string, .required)
+            .field("skill", .uuid, .required)
             .field("task_description", .string, .required)
             .field("project_description", .string, .required)
             .field("experience", .string, .required)
             .field("data_start", .datetime, .required)
             .field("data_end", .datetime, .required)
+            .field("files", .array(of: .string), .required)
             .field("is_active", .bool, .required)
             .create()
     }

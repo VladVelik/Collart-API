@@ -11,6 +11,7 @@ struct CreateUserRequest: Content {
     let cover: String
     let searchable: Bool
     let experience: ExperienceType
+    let skills: [String]
 }
 
 struct LoginRequest: Content {
@@ -35,4 +36,15 @@ struct GoogleUserInfo {
 
 struct UpdatePhotoData: Content {
     let photoURL: String
+}
+
+struct UpdateUserRequest: Content {
+    var email: String?
+    var passwordHash: String?
+    var confirmPasswordHash: String?
+    var name: String?
+    var surname: String?
+    var description: String?
+    var searchable: Bool?
+    var experience: ExperienceType?
 }

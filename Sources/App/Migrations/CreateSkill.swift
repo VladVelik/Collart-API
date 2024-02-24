@@ -4,7 +4,8 @@ struct CreateSkill: Migration {
     func prepare(on database: Database) -> EventLoopFuture<Void> {
         database.schema("skills")
             .id()
-            .field("name", .string, .required)
+            .field("name_en", .string, .required)
+            .field("name_ru", .string, .required)
             .create()
     }
 
