@@ -14,6 +14,7 @@ struct UserController: RouteCollection {
         usersRoute.get(":userID", use: get)
         usersRoute.put(":userID", use: update)
         usersRoute.delete(":userID", use: delete)
+        
         let tokenProtected = usersRoute.grouped(JWTMiddleware())
         tokenProtected.post(":userID", "photo", use: { req in
             try self.uploadImage(req: req, imageType: .photo)

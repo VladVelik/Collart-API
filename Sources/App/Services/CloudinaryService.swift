@@ -43,7 +43,7 @@ struct CloudinaryService {
                 throw Abort(.internalServerError, reason: "Invalid response from Cloudinary")
             }
             let data = Data(buffer: body)
-            //                // Попытка преобразования Data в String для логирования
+                            // Попытка преобразования Data в String для логирования
             if let bodyString = String(data: data, encoding: .utf8) {
                 print("Cloudinary response: \(bodyString)")
             }
