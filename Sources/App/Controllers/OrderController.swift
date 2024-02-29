@@ -21,9 +21,10 @@ struct OrderController: RouteCollection {
         routes.group("orders") { authGroup in
             let tokenProtected = authGroup.grouped(JWTMiddleware())
             tokenProtected.post("addOrder", use: addOrder)
-            
+            tokenProtected.put(":orderId", use: updateOrder)
             tokenProtected.get("myOrders", use: getAllOrders)
             tokenProtected.get("myOrders", ":orderID", use: getOrder)
+            tokenProtected.delete(":orderId", use: deleteOrder)
         }
     }
     
@@ -37,7 +38,7 @@ struct OrderController: RouteCollection {
     // Получение деталей конкретного заказа текущего пользователя по ID
     func getOrder(req: Request) throws -> EventLoopFuture<Order> {
         let userID = try req.auth.require(User.self).requireID()
-        guard let orderID = req.parameters.get("orderID", as: UUID.self) else {
+        guard req.parameters.get("orderID", as: UUID.self) != nil else {
             throw Abort(.badRequest, reason: "Order ID is missing or invalid")
         }
         return Order.query(on: req.db)
@@ -114,92 +115,96 @@ struct OrderController: RouteCollection {
         
         
     }
-
-
-//    func updateOrder(req: Request) throws -> EventLoopFuture<HTTPStatus> {
-//        let userID = try req.auth.require(User.self).requireID()
-//        let updateData = try req.content.decode(OrderUpdateRequest.self)
-//        //let orderID = try req.parameters.require("orderID", as: UUID.self)
-//
-//        return Order.find(orderID, on: req.db).unwrap(or: Abort(.notFound)).flatMapThrowing { order in
-//            var updateFutures: [EventLoopFuture<Void>] = []
-//
-//            // Если предоставлено новое изображение, удалить старое из Cloudinary и загрузить новое
-//            if let newImage = updateData.image {
-//                let deleteOldImageFuture = try cloudinaryService.delete(publicId: order.image, on: req)
-//                updateFutures.append(deleteOldImageFuture)
-//                let uploadNewImageFuture = try cloudinaryService.upload(file: newImage, on: req).map { newImageUrl in
-//                    order.image = newImageUrl
-//                }
-//                updateFutures.append(uploadNewImageFuture)
-//            }
-//
-//            // Если предоставлены новые файлы, удалить старые из Cloudinary и загрузить новые
-//            if let newFiles = updateData.files, !newFiles.isEmpty {
-//                let deleteOldFilesFutures = order.files.map { try cloudinaryService.delete(publicId: $0, on: req) }
-//                updateFutures.append(contentsOf: deleteOldFilesFutures)
-//
-//                let uploadNewFilesFutures = try newFiles.map { try cloudinaryService.upload(file: $0, on: req) }.flatten(on: req.eventLoop).map { newFileUrls in
-//                    order.files = newFileUrls
-//                }
-//                updateFutures.append(uploadNewFilesFutures)
-//            }
-//
-//            // Обновить данные заказа
-//            if let title = updateData.title { order.title = title }
-//            if let taskDescription = updateData.taskDescription { order.taskDescription = taskDescription }
-//            if let projectDescription = updateData.projectDescription { order.projectDescription = projectDescription }
-//            if let experience = updateData.experience { order.experience = experience }
-//            if let dataStart = updateData.dataStart { order.dataStart = dataStart }
-//            if let dataEnd = updateData.dataEnd { order.dataEnd = dataEnd }
-//            //if let isActive = updateData.isActive { order.isActive = isActive }
-//
-//            // Найти Skill по имени, если он предоставлен
-//            let skillFuture: EventLoopFuture<Void> = (updateData.skill != nil) ? Skill.query(on: req.db)
-//                .group(.or) { or in
-//                    or.filter(\Skill.$nameEn == updateData.skill!)
-//                    or.filter(\Skill.$nameRu == updateData.skill!)
-//                }
-//                .first()
-//                .unwrap(or: Abort(.badRequest, reason: "Skill not found"))
-//                .flatMapThrowing { skill in
-//                    order.skill = try skill.requireID()
-//                } : req.eventLoop.makeSucceededFuture(())
-//
-//            updateFutures.append(skillFuture)
-//
-//            // Обновить инструменты, если они предоставлены
-//            let toolsUpdateFuture: EventLoopFuture<Void> = (updateData.tools != nil) ? Tool.query(on: req.db)
-//                .filter(\.$name ~~ updateData.tools!)
-//                .all()
-//                .flatMap { tools in
-//                    // Удаление существующих OrderTool для этого Order
-//                    OrderTool.query(on: req.db)
-//                        .filter(\.$order.$id == orderID) // Уточнение key path с использованием $ для доступа к свойству модели
-//                        .delete()
-//                        .flatMapThrowing { _ in
-//                            // Создание новых OrderTool
-//                            let orderTools = try tools.map { tool in
-//                                OrderTool(orderID: orderID, toolID: try tool.requireID())
-//                            }
-//                            return orderTools.map { orderTool in
-//                                orderTool.save(on: req.db)
-//                            }.flatten(on: req.eventLoop)
-//                        }
-//                } : req.eventLoop.makeSucceededFuture(())
-//
-//            updateFutures.append(toolsUpdateFuture)
-//
-//            // Выполнение всех обновлений
-//            return EventLoopFuture.andAllSucceed(updateFutures, on: req.eventLoop).flatMap {
-//                
-//                // Сохранение обновленных данных заказа
-//                 order.save(on: req.db)
-//            }
-//        }.transform(to: .ok)
-//    }
-
     
+    func updateOrder(req: Request) throws -> EventLoopFuture<HTTPStatus> {
+        let orderID = try req.parameters.require("orderId", as: UUID.self)
+        let updateData = try req.content.decode(OrderUpdateRequest.self)
+        
+        return Order.find(orderID, on: req.db).unwrap(or: Abort(.notFound)).flatMapThrowing { order in
+            var deleteFutures: [EventLoopFuture<Void>] = []
+            
+            if let newImage = updateData.image {
+                let deleteOldImageFuture = try cloudinaryService.delete(publicId: extractResourceName(from: order.image) ?? "", on: req)
+                deleteFutures.append(deleteOldImageFuture)
+                let uploadNewImageFuture = try cloudinaryService.upload(file: newImage, on: req).map { newImageUrl in
+                    order.image = newImageUrl
+                }
+                deleteFutures.append(uploadNewImageFuture)
+            }
+            
+            // Если предоставлены новые файлы, удалить старые из Cloudinary и загрузить новые
+            if let newFiles = updateData.files, !newFiles.isEmpty {
+                let deleteOldFilesFutures = try order.files.map { try cloudinaryService.delete(publicId: extractResourceName(from: $0) ?? "", on: req) }
+                deleteFutures.append(contentsOf: deleteOldFilesFutures)
+                
+                let uploadNewFilesFutures = try newFiles.map { try cloudinaryService.upload(file: $0, on: req) }.flatten(on: req.eventLoop).map { newFileUrls in
+                    order.files = newFileUrls
+                }
+                deleteFutures.append(uploadNewFilesFutures)
+            }
+            
+            if let title = updateData.title { order.title = title }
+            if let taskDescription = updateData.taskDescription { order.taskDescription = taskDescription }
+            if let projectDescription = updateData.projectDescription { order.projectDescription = projectDescription }
+            if let experience = updateData.experience { order.experience = experience }
+            if let dataStart = updateData.dataStart { order.dataStart = dataStart }
+            if let dataEnd = updateData.dataEnd { order.dataEnd = dataEnd }
+            
+            return EventLoopFuture.andAllSucceed(deleteFutures, on: req.eventLoop).flatMap {
+                return order.save(on: req.db) // Сохраняем изменения в order
+            }.flatMapThrowing {
+                if let tools = updateData.tools {
+                    // Удалить старые связи OrderTool
+                    return OrderTool.query(on: req.db).filter(\.$order.$id == orderID).delete().flatMap {
+                        // Создать новые связи OrderTool
+                        let toolsFutures = tools.map { toolName -> EventLoopFuture<Void> in
+                            // Здесь предполагается, что инструменты уже существуют в базе данных
+                            return Tool.query(on: req.db).filter(\.$name == toolName).first().unwrap(or: Abort(.notFound)).flatMap { tool in
+                                let orderTool = OrderTool(orderID: orderID, toolID: tool.id!)
+                                return orderTool.save(on: req.db)
+                            }
+                        }
+                        // Дождаться выполнения всех futures
+                        return EventLoopFuture.andAllSucceed(toolsFutures, on: req.eventLoop)
+                    }
+                } else {
+                    return req.eventLoop.makeSucceededFuture(())
+                }
+            }
+        }.transform(to: HTTPStatus.ok)
+    }
+    
+    // Метод для удаления заказа, связанных файлов на Cloudinary и записей в связанных таблицах
+    func deleteOrder(req: Request) throws -> EventLoopFuture<HTTPStatus> {
+        let projectID = try req.parameters.require("orderId", as: UUID.self)
+        
+        // Найти заказ для удаления
+        return Order.find(projectID, on: req.db).unwrap(or: Abort(.notFound)).flatMapThrowing { order in
+            // Удаление изображения заказа с Cloudinary
+            let deleteImageFuture = try cloudinaryService.delete(publicId: extractResourceName(from: order.image) ?? "", on: req)
+            
+            // Удаление файлов заказа с Cloudinary
+            let deleteFilesFutures = try order.files.map { fileUrl in
+                try cloudinaryService.delete(publicId: extractResourceName(from: fileUrl) ?? "", on: req)
+            }.flatten(on: req.eventLoop)
+            
+            // Удаление связанных записей в таблицах OrderTool, Interactions, OrderParticipant, и Tab
+            let deleteOrderToolFuture = OrderTool.query(on: req.db).filter(\.$order.$id == projectID).delete()
+            let deleteInteractionsFuture = Interaction.query(on: req.db).filter(\.$order.$id == projectID).delete()
+            let deleteOrderParticipantFuture = OrderParticipant.query(on: req.db).filter(\.$order.$id == projectID).delete()
+            let deleteTabsFuture = Tab.query(on: req.db).filter(\.$projectID == projectID).delete()
+            
+            // Собираем все фьючерсы вместе
+            return deleteImageFuture.and(deleteFilesFutures)
+                .and(deleteOrderToolFuture)
+                .and(deleteInteractionsFuture)
+                .and(deleteOrderParticipantFuture)
+                .and(deleteTabsFuture).flatMap { _ in
+                    // Удаляем сам заказ
+                    order.delete(on: req.db)//.transform(to: .ok)
+                }
+        }.transform(to: .ok)
+    }
 
     private func extractResourceName(from url: String) -> String? {
         let components = url.split(separator: "/")
@@ -228,7 +233,6 @@ struct OrderCreateRequest: Content {
 struct OrderUpdateRequest: Content {
     var title: String?
     var image: File?
-    var skill: String?
     var taskDescription: String?
     var projectDescription: String?
     var experience: ExperienceType?
