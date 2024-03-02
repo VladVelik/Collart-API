@@ -25,6 +25,9 @@ struct OrderController: RouteCollection {
             tokenProtected.get("myOrders", use: getAllOrders)
             tokenProtected.get("myOrders", ":orderID", use: getOrder)
             tokenProtected.delete(":orderId", use: deleteOrder)
+            
+            tokenProtected.post("addOrderToFavorite", ":orderId", use: addOrderToFavorite)
+            tokenProtected.delete("removeOrderFromFavorite", ":orderId", use: removeOrderFromFavorite)
         }
     }
     
@@ -43,8 +46,8 @@ struct OrderController: RouteCollection {
         }
         return Order.query(on: req.db)
             .filter(\.$owner.$id == userID)
-                     .first()
-                     .unwrap(or: Abort(.notFound))
+            .first()
+            .unwrap(or: Abort(.notFound))
     }
 
     
@@ -205,6 +208,36 @@ struct OrderController: RouteCollection {
                 }
         }.transform(to: .ok)
     }
+    
+    // Добавление проекта в портфолио пользователя
+    func addOrderToFavorite(req: Request) throws -> EventLoopFuture<HTTPStatus> {
+        let userID = try req.auth.require(User.self).requireID()
+        let projectID = try req.parameters.require("orderId", as: UUID.self)
+
+        // Создание записи в Tab с типом TabType.portfolio
+        let tab = Tab(userID: userID, projectID: projectID, tabType: .favorite)
+
+        return tab.save(on: req.db).transform(to: .created)
+    }
+    
+    // Удаление проекта из портфолио пользователя
+    func removeOrderFromFavorite(req: Request) throws -> EventLoopFuture<HTTPStatus> {
+        let userID = try req.auth.require(User.self).requireID()
+        let projectID = try req.parameters.require("orderId", as: UUID.self)
+
+        // Находим запись в Tab с типом TabType.portfolio и удаляем ее
+        return Tab.query(on: req.db)
+            .filter(\.$user.$id == userID)
+            .filter(\.$projectID == projectID)
+            .filter(\.$tabType == .favorite)
+            .first()
+            .unwrap(or: Abort(.notFound, reason: "Project not found in portfolio"))
+            .flatMap { tab in
+                tab.delete(on: req.db)
+            }.transform(to: .ok)
+    }
+
+
 
     private func extractResourceName(from url: String) -> String? {
         let components = url.split(separator: "/")
