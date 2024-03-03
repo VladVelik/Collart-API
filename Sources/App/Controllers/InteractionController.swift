@@ -159,11 +159,10 @@ struct InteractionController: RouteCollection {
         
         return Interaction.query(on: req.db)
             .filter(\.$id == interactionID)
-            .with(\.$sender) // Предварительная загрузка связи с отправителем
+            .with(\.$sender)
             .first()
             .unwrap(or: Abort(.notFound))
             .flatMap { interaction in
-                // Теперь безопасно можно обращаться к interaction.sender.id
                 guard interaction.sender.id == senderData.senderID,
                       interaction.status == .active || interaction.status == .rejected else {
                     return req.eventLoop.makeFailedFuture(Abort(.unauthorized, reason: "Только отправитель может удалить активную или отклоненную интеракцию."))

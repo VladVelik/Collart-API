@@ -64,6 +64,9 @@ final class User: Model, Content {
     @Siblings(through: OrderParticipant.self, from: \.$user, to: \.$order)
     var participatingOrders: [Order]
     
+    @Siblings(through: UserTool.self, from: \.$user, to: \.$tool)
+    var tools: [Tool]
+    
     init() {}
     
     init(

@@ -17,6 +17,7 @@ struct SkillController: RouteCollection {
         skillsRoute.post(use: create)
         skillsRoute.put(":skillID", use: update)
         skillsRoute.delete(":skillID", use: delete)
+        skillsRoute.get("user", ":userID", use: getUserSkills)
     }
 
     // Создание скилла
@@ -80,7 +81,7 @@ struct SkillController: RouteCollection {
         
         // Проверяем, связан ли скилл с каким-либо заказом
         let isSkillUsedByOrder = Order.query(on: req.db)
-            .filter(\.$skill == skillID) // Use the $ prefix for the property wrapper
+            .filter(\.$skill == skillID)
             .first()
             .flatMapThrowing { existingOrder in
                 guard existingOrder == nil else {
@@ -98,5 +99,21 @@ struct SkillController: RouteCollection {
                 }
         }.transform(to: .ok)
     }
-
+    
+    // Получение навыков конкретного пользователя по его ID
+    func getUserSkills(req: Request) throws -> EventLoopFuture<[Skill]> {
+        guard let userID = req.parameters.get("userID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "User ID is missing")
+        }
+        
+        return UserSkill.query(on: req.db)
+            .filter(\.$user.$id == userID)
+            .all()
+            .flatMap { userSkills in
+                let skillIDs = userSkills.map { $0.$skill.id }
+                return Skill.query(on: req.db)
+                    .filter(\.$id ~~ skillIDs)
+                    .all()
+            }
+    }
 }

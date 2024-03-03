@@ -159,15 +159,12 @@ struct OrderController: RouteCollection {
                 if let tools = updateData.tools {
                     // Удалить старые связи OrderTool
                     return OrderTool.query(on: req.db).filter(\.$order.$id == orderID).delete().flatMap {
-                        // Создать новые связи OrderTool
                         let toolsFutures = tools.map { toolName -> EventLoopFuture<Void> in
-                            // Здесь предполагается, что инструменты уже существуют в базе данных
                             return Tool.query(on: req.db).filter(\.$name == toolName).first().unwrap(or: Abort(.notFound)).flatMap { tool in
                                 let orderTool = OrderTool(orderID: orderID, toolID: tool.id!)
                                 return orderTool.save(on: req.db)
                             }
                         }
-                        // Дождаться выполнения всех futures
                         return EventLoopFuture.andAllSucceed(toolsFutures, on: req.eventLoop)
                     }
                 } else {
@@ -191,19 +188,16 @@ struct OrderController: RouteCollection {
                 try cloudinaryService.delete(publicId: extractResourceName(from: fileUrl) ?? "", on: req)
             }.flatten(on: req.eventLoop)
             
-            // Удаление связанных записей в таблицах OrderTool, Interactions, OrderParticipant, и Tab
             let deleteOrderToolFuture = OrderTool.query(on: req.db).filter(\.$order.$id == projectID).delete()
             let deleteInteractionsFuture = Interaction.query(on: req.db).filter(\.$order.$id == projectID).delete()
             let deleteOrderParticipantFuture = OrderParticipant.query(on: req.db).filter(\.$order.$id == projectID).delete()
             let deleteTabsFuture = Tab.query(on: req.db).filter(\.$projectID == projectID).delete()
             
-            // Собираем все фьючерсы вместе
             return deleteImageFuture.and(deleteFilesFutures)
                 .and(deleteOrderToolFuture)
                 .and(deleteInteractionsFuture)
                 .and(deleteOrderParticipantFuture)
                 .and(deleteTabsFuture).flatMap { _ in
-                    // Удаляем сам заказ
                     order.delete(on: req.db)//.transform(to: .ok)
                 }
         }.transform(to: .ok)
@@ -225,7 +219,6 @@ struct OrderController: RouteCollection {
         let userID = try req.auth.require(User.self).requireID()
         let projectID = try req.parameters.require("orderId", as: UUID.self)
 
-        // Находим запись в Tab с типом TabType.portfolio и удаляем ее
         return Tab.query(on: req.db)
             .filter(\.$user.$id == userID)
             .filter(\.$projectID == projectID)
@@ -237,13 +230,10 @@ struct OrderController: RouteCollection {
             }.transform(to: .ok)
     }
 
-
-
     private func extractResourceName(from url: String) -> String? {
         let components = url.split(separator: "/")
         guard let lastComponent = components.last else { return nil }
         
-        // Извлекаем имя файла без расширения
         let fileName = lastComponent.split(separator: ".").first
         return fileName.map(String.init)
     }

@@ -23,6 +23,8 @@ func routes(_ app: Application) throws {
     try app.register(collection: SkillController())
     try app.register(collection: ToolController())
     try app.register(collection: InteractionController())
+    try app.register(collection: TabController())
+    try app.register(collection: SearchController())
 }
 
 func protectedHandler(req: Request) throws -> String {

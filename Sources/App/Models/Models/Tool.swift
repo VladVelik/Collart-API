@@ -12,6 +12,9 @@ final class Tool: Model, Content {
 
     @Siblings(through: OrderTool.self, from: \.$tool, to: \.$order)
     var orders: [Order]
+    
+    @Siblings(through: UserTool.self, from: \.$tool, to: \.$user)
+    var users: [User]
 
     init() {}
 

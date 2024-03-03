@@ -30,6 +30,7 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(CreateOrderTool())
     app.migrations.add(CreateInteractions())
     app.migrations.add(CreateOrderParticipant())
+    app.migrations.add(CreateUserTool())
     
     app.jwt.signers.use(.hs256(key: "SECRET_KEY"))
     app.routes.defaultMaxBodySize = "10mb"

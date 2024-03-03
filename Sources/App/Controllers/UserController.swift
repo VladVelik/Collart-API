@@ -122,7 +122,7 @@ struct UserController: RouteCollection {
             User.find(userID, on: db)
                 .unwrap(or: Abort(.notFound))
                 .flatMap { user in
-                    var updateLogin = false // Флаг, указывающий на необходимость обновления логина
+                    var updateLogin = false
 
                     if let email = updateUserRequest.email, !email.isEmpty {
                         user.email = email

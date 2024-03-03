@@ -28,38 +28,52 @@ struct AuthController: RouteCollection {
                 guard existingUser == nil else {
                     throw Abort(.badRequest, reason: "User with this email already exists")
                 }
-                
+            }
+            .flatMapThrowing {
                 // Создаем нового пользователя
                 let user = User(email: createRequest.email, name: createRequest.name, surname: createRequest.surname, description: createRequest.description, userPhoto: createRequest.userPhoto, cover: createRequest.cover, searchable: createRequest.searchable, experience: createRequest.experience)
-                
                 let hashedPassword = try Bcrypt.hash(createRequest.passwordHash)
                 
-                return user.save(on: req.db).flatMapThrowing { _ in
-                    Skill.query(on: req.db).filter(\.$nameRu ~~ createRequest.skills).all().flatMapThrowing { skills in
-                        // Убеждаемся, что все навыки найдены
-                        guard skills.count == createRequest.skills.count else {
-                            throw Abort(.badRequest, reason: "Some skills were not found")
-                        }
-                        
-                        let userSkills = try skills.map { skill -> UserSkill in
-                            return UserSkill(userID: try user.requireID(), skillID: try skill.requireID())
-                        }
-                        
-                        return userSkills.map { $0.save(on: req.db) }
-                            .flatten(on: req.eventLoop)
-                            .flatMapThrowing {
-                                // Создаем учетные данные для входа в систему
-                                let credential = AuthCredential(
-                                    login: createRequest.email,
-                                    passwordHash: hashedPassword,
-                                    userID: try user.requireID())
-                                return credential.save(on: req.db)
+                return user.save(on: req.db).flatMap { _ in
+                    Skill.query(on: req.db)
+                        .filter(\.$nameRu ~~ createRequest.skills)
+                        .all()
+                        .flatMap { skills in
+                            // Проверка, что все навыки найдены
+                            guard skills.count == createRequest.skills.count else {
+                                return req.eventLoop.makeFailedFuture(Abort(.badRequest, reason: "Some skills were not found"))
                             }
-                    }
+                            // Сохранение UserSkills
+                            let userSkills = skills.map { skill -> EventLoopFuture<Void> in
+                                let userSkill = UserSkill(userID: user.id!, skillID: skill.id!)
+                                return userSkill.save(on: req.db)
+                            }
+                            return EventLoopFuture<Void>.andAllSucceed(userSkills, on: req.eventLoop)
+                        }
+                        .flatMap {
+                            // Сохранение UserTools
+                            let toolNames = createRequest.tools
+                            return Tool.query(on: req.db)
+                                .filter(\.$name ~~ toolNames)
+                                .all()
+                                .flatMap { tools in
+                                    let userTools = tools.map { tool -> EventLoopFuture<Void> in
+                                        let userTool = UserTool(userID: user.id!, toolID: tool.id!)
+                                        return userTool.save(on: req.db)
+                                    }
+                                    return EventLoopFuture<Void>.andAllSucceed(userTools, on: req.eventLoop)
+                                }
+                        }
+                        .flatMap {
+                            // Создание учетных данных для входа в систему
+                            let credential = AuthCredential(login: createRequest.email, passwordHash: hashedPassword, userID: user.id!)
+                            return credential.save(on: req.db)
+                        }
                 }
             }
             .transform(to: .created)
     }
+
     
     
     func login(_ req: Request) throws -> EventLoopFuture<TokenResponse> {

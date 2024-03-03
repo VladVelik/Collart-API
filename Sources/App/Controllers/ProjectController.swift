@@ -95,7 +95,7 @@ struct ProjectController: RouteCollection {
                     return portfolioProject.save(on: req.db)
                 }
             }
-        }.transform(to: .ok) // Возвращаем HTTPStatus.ok после всех операций
+        }.transform(to: .ok)
     }
 
     func addPortfolioProject(req: Request) throws -> EventLoopFuture<HTTPStatus> {

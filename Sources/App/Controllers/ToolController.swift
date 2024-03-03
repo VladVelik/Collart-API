@@ -16,6 +16,12 @@ struct ToolController: RouteCollection {
         toolsRoute.get(use: getAll)
         toolsRoute.put(":toolID", use: update)
         toolsRoute.delete(":toolID", use: delete)
+        
+        toolsRoute.get("user", ":userID", use: getUserTools)
+        toolsRoute.get("order", ":orderID", use: getOrderTools)
+        
+        toolsRoute.post("addUserTool", use: addUserTool)
+        toolsRoute.delete("removeUserTool", use: removeUserTool)
     }
 
     // Create a tool
@@ -48,20 +54,97 @@ struct ToolController: RouteCollection {
             }
     }
 
-    // Delete a tool
     func delete(req: Request) throws -> EventLoopFuture<HTTPStatus> {
         let toolID = try req.parameters.require("toolID", as: UUID.self)
 
-        // Check if the tool is associated with any orders
         return Tool.find(toolID, on: req.db)
             .unwrap(or: Abort(.notFound))
             .flatMap { tool in
-                tool.$orders.query(on: req.db).count().flatMap { count in
+                // Проверяем, связан ли инструмент с каким-либо заказом
+                let isToolUsedByOrder = tool.$orders.query(on: req.db).count().flatMap { count -> EventLoopFuture<Void> in
                     guard count == 0 else {
                         return req.eventLoop.makeFailedFuture(Abort(.badRequest, reason: "Tool is in use by an order and cannot be deleted."))
                     }
-                    return tool.delete(on: req.db).transform(to: .ok)
+                    return req.eventLoop.makeSucceededFuture(())
+                }
+                
+                // Проверяем, связан ли инструмент с каким-либо пользователем
+                let isToolUsedByUser = UserTool.query(on: req.db)
+                    .filter(\.$tool.$id == toolID)
+                    .count()
+                    .flatMap { count -> EventLoopFuture<Void> in
+                        guard count == 0 else {
+                            return req.eventLoop.makeFailedFuture(Abort(.badRequest, reason: "Tool is in use by a user and cannot be deleted."))
+                        }
+                        return req.eventLoop.makeSucceededFuture(())
+                    }
+                
+                return isToolUsedByOrder.and(isToolUsedByUser).flatMap { _ in
+                    tool.delete(on: req.db).transform(to: .ok)
                 }
             }
     }
+    
+    func getUserTools(req: Request) throws -> EventLoopFuture<[Tool]> {
+        guard let userID = req.parameters.get("userID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "User ID is missing")
+        }
+
+        return UserTool.query(on: req.db)
+            .filter(\.$user.$id == userID)
+            .with(\.$tool)
+            .all()
+            .map { userTools in
+                userTools.map { $0.tool }
+            }
+    }
+
+    func getOrderTools(req: Request) throws -> EventLoopFuture<[Tool]> {
+        guard let orderID = req.parameters.get("orderID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "Order ID is missing")
+        }
+
+        return OrderTool.query(on: req.db)
+            .filter(\.$order.$id == orderID)
+            .with(\.$tool)
+            .all()
+            .map { orderTools in
+                orderTools.map { $0.tool }
+            }
+    }
+    
+    func addUserTool(req: Request) throws -> EventLoopFuture<HTTPStatus> {
+        let data = try req.content.decode(UserToolData.self)
+        
+        return User.find(data.userID, on: req.db)
+            .unwrap(or: Abort(.notFound, reason: "User not found"))
+            .flatMap { user in
+                return Tool.find(data.toolID, on: req.db)
+                    .unwrap(or: Abort(.notFound, reason: "Tool not found"))
+                    .flatMap { tool in
+                        let userTool = UserTool(userID: user.id!, toolID: tool.id!)
+                        return userTool.save(on: req.db).transform(to: .created)
+                    }
+            }
+    }
+
+    func removeUserTool(req: Request) throws -> EventLoopFuture<HTTPStatus> {
+        let data = try req.content.decode(UserToolData.self)
+        
+        return UserTool.query(on: req.db)
+            .filter(\.$user.$id == data.userID)
+            .filter(\.$tool.$id == data.toolID)
+            .first()
+            .unwrap(or: Abort(.notFound, reason: "UserTool not found"))
+            .flatMap { userTool in
+                userTool.delete(on: req.db).transform(to: .ok)
+            }
+    }
+
+
+}
+
+struct UserToolData: Content {
+    let userID: UUID
+    let toolID: UUID
 }

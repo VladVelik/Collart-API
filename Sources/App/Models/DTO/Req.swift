@@ -12,6 +12,7 @@ struct CreateUserRequest: Content {
     let searchable: Bool
     let experience: ExperienceType
     let skills: [String]
+    let tools: [String]
 }
 
 struct LoginRequest: Content {
