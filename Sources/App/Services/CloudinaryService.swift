@@ -1,7 +1,6 @@
 // CloudinaryService.swift
 
 import Vapor
-import CryptoKit
 import Foundation
 
 struct CloudinaryService {
