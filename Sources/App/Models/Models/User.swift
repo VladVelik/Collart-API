@@ -106,7 +106,7 @@ extension User {
         let searchable: Bool
         let experience: ExperienceType
     }
-
+    
     func asPublic() -> Public {
         return Public(
             id: self.id,

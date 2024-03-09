@@ -34,7 +34,6 @@ struct AuthController: RouteCollection {
                 }
             }
             .flatMapThrowing {
-                // Создаем нового пользователя
                 let user = User(email: createRequest.email, name: createRequest.name, surname: createRequest.surname, description: createRequest.description, userPhoto: createRequest.userPhoto, cover: createRequest.cover, searchable: createRequest.searchable, experience: createRequest.experience)
                 let hashedPassword = try Bcrypt.hash(createRequest.passwordHash)
                 
@@ -46,10 +45,6 @@ struct AuthController: RouteCollection {
                         }
                         .all()
                         .flatMap { skills in
-                            guard skills.count == createRequest.skills.count else {
-                                return req.eventLoop.makeFailedFuture(Abort(.badRequest, reason: "Some skills were not found"))
-                            }
-
                             var isFirst = true
                             let userSkills = skills.enumerated().map { index, skill -> EventLoopFuture<Void> in
                                 let isPrimary = isFirst
@@ -60,7 +55,6 @@ struct AuthController: RouteCollection {
                             return EventLoopFuture<Void>.andAllSucceed(userSkills, on: req.eventLoop)
                         }
                         .flatMap {
-                            // Сохранение UserTools
                             let toolNames = createRequest.tools
                             return Tool.query(on: req.db)
                                 .filter(\.$name ~~ toolNames)
@@ -74,7 +68,6 @@ struct AuthController: RouteCollection {
                                 }
                         }
                         .flatMap {
-                            // Создание учетных данных для входа в систему
                             let credential = AuthCredential(login: createRequest.email, passwordHash: hashedPassword, userID: user.id!)
                             return credential.save(on: req.db)
                         }
@@ -106,8 +99,23 @@ struct AuthController: RouteCollection {
         return try req.jwt.sign(payload)
     }
     
-    func getUser(_ req: Request) throws -> EventLoopFuture<User.Public> {
+    func getUser(_ req: Request) throws -> EventLoopFuture<UserWithSkills> {
         let user = try req.auth.require(User.self)
-        return req.eventLoop.future(user.asPublic())
+
+        return user.$skills.query(on: req.db).all().map { skills in
+            let skillNames = skills.map { SkillNames(nameEn: $0.nameEn, nameRu: $0.nameRu) }
+
+            let userPublic = user.asPublic()
+            return UserWithSkills(user: userPublic, skills: skillNames)
+        }
     }
+}
+
+struct SkillNames: Content {
+    var nameEn: String
+    var nameRu: String
+}
+struct UserWithSkills: Content {
+    let user: User.Public
+    let skills: [SkillNames]
 }
