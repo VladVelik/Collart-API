@@ -17,6 +17,10 @@ struct AuthController: RouteCollection {
     func register(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
         let createRequest = try req.content.decode(CreateUserRequest.self)
         
+        guard createRequest.skills.count <= 3 else {
+            throw Abort(.badRequest, reason: "You can only add up to 3 skills")
+        }
+        
         guard createRequest.passwordHash == createRequest.confirmPasswordHash else {
             throw Abort(.badRequest, reason: "Passwords did not match")
         }
@@ -36,16 +40,21 @@ struct AuthController: RouteCollection {
                 
                 return user.save(on: req.db).flatMap { _ in
                     Skill.query(on: req.db)
-                        .filter(\.$nameRu ~~ createRequest.skills)
+                        .group(.or) { or in
+                            or.filter(\.$nameRu ~~ createRequest.skills)
+                            or.filter(\.$nameEn ~~ createRequest.skills)
+                        }
                         .all()
                         .flatMap { skills in
-                            // Проверка, что все навыки найдены
                             guard skills.count == createRequest.skills.count else {
                                 return req.eventLoop.makeFailedFuture(Abort(.badRequest, reason: "Some skills were not found"))
                             }
-                            // Сохранение UserSkills
-                            let userSkills = skills.map { skill -> EventLoopFuture<Void> in
-                                let userSkill = UserSkill(userID: user.id!, skillID: skill.id!)
+
+                            var isFirst = true
+                            let userSkills = skills.enumerated().map { index, skill -> EventLoopFuture<Void> in
+                                let isPrimary = isFirst
+                                isFirst = false
+                                let userSkill = UserSkill(primary: isPrimary, userID: user.id!, skillID: skill.id!)
                                 return userSkill.save(on: req.db)
                             }
                             return EventLoopFuture<Void>.andAllSucceed(userSkills, on: req.eventLoop)

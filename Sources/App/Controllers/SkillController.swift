@@ -15,6 +15,7 @@ struct SkillController: RouteCollection {
         skillsRoute.get("id", ":skillID", use: get)
         skillsRoute.get(":language", use: getAllByLanguage)
         skillsRoute.post(use: create)
+        skillsRoute.post("array", use: createArray)
         skillsRoute.put(":skillID", use: update)
         skillsRoute.delete(":skillID", use: delete)
         skillsRoute.get("user", ":userID", use: getUserSkills)
@@ -25,6 +26,19 @@ struct SkillController: RouteCollection {
         let skill = try req.content.decode(Skill.self)
         return skill.save(on: req.db).map { skill }
     }
+    
+    // Создание массива скиллов
+    func createArray(req: Request) throws -> EventLoopFuture<HTTPStatus> {
+        let skills = try req.content.decode([Skill].self)
+        
+        return req.db.transaction { db in
+            let saveFutures = skills.map { skill in
+                skill.save(on: db)
+            }
+            return EventLoopFuture<Void>.andAllSucceed(saveFutures, on: req.eventLoop)
+        }.transform(to: .created)
+    }
+
     
     // Get a skill by ID
     func get(req: Request) throws -> EventLoopFuture<Skill> {

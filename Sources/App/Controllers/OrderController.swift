@@ -22,7 +22,8 @@ struct OrderController: RouteCollection {
             let tokenProtected = authGroup.grouped(JWTMiddleware())
             tokenProtected.post("addOrder", use: addOrder)
             tokenProtected.put(":orderId", use: updateOrder)
-            tokenProtected.get("myOrders", use: getAllOrders)
+            tokenProtected.get("myOrders", use: getAllUserOrders)
+            tokenProtected.get("allOrders", use: getAllOrders)
             tokenProtected.get("myOrders", ":orderID", use: getOrder)
             tokenProtected.delete(":orderId", use: deleteOrder)
             
@@ -32,10 +33,41 @@ struct OrderController: RouteCollection {
     }
     
     // Получение списка всех заказов текущего пользователя
-    func getAllOrders(req: Request) throws -> EventLoopFuture<[Order]> {
+    func getAllUserOrders(req: Request) throws -> EventLoopFuture<[OrderWithUserAndTools]> {
         let userID = try req.auth.require(User.self).requireID()
+
         return Order.query(on: req.db)
-            .filter(\.$owner.$id == userID).all()
+            .filter(\.$owner.$id == userID)
+            .with(\.$owner)
+            .all()
+            .flatMap { orders in
+                let toolsFutures = orders.map { order in
+                    order.$tools.query(on: req.db).all().map { (order, $0) }
+                }
+                
+                return toolsFutures.flatten(on: req.eventLoop).map { results in
+                    results.map { order, tools in
+                        OrderWithUserAndTools(order: order, user: order.owner, tools: tools)
+                    }
+                }
+            }
+    }
+    
+    func getAllOrders(req: Request) throws -> EventLoopFuture<[OrderWithUserAndTools]> {
+        return Order.query(on: req.db)
+            .with(\.$owner)
+            .all()
+            .flatMap { orders in
+                let toolsFutures = orders.map { order in
+                    order.$tools.query(on: req.db).all().map { (order, $0) }
+                }
+                
+                return toolsFutures.flatten(on: req.eventLoop).map { results in
+                    results.map { order, tools in
+                        OrderWithUserAndTools(order: order, user: order.owner, tools: tools)
+                    }
+                }
+            }
     }
 
     // Получение деталей конкретного заказа текущего пользователя по ID
@@ -56,12 +88,13 @@ struct OrderController: RouteCollection {
         let createRequest = try req.content.decode(OrderCreateRequest.self)
         
         // Сначала загрузим изображение заказа на Cloudinary
-        let imageUpload = try cloudinaryService.upload(file: createRequest.image, on: req)
+        let imageUpload: EventLoopFuture<String?> = try createRequest.image.map {
+                try cloudinaryService.upload(file: $0, on: req).map(Optional.some)
+            } ?? req.eventLoop.future(nil)
         
-        // Затем загрузим файлы заказа на Cloudinary
-        let filesUploads = try createRequest.files.map { file in
-            try cloudinaryService.upload(file: file, on: req)
-        }
+        let filesUploads: [EventLoopFuture<String>] = try createRequest.files?.map {
+            try cloudinaryService.upload(file: $0, on: req)
+        } ?? []
         
         // Найдем Skill по имени
         let skillLookup = Skill.query(on: req.db)
@@ -79,7 +112,7 @@ struct OrderController: RouteCollection {
                 let order = Order(
                     ownerID: userID,
                     title: createRequest.title,
-                    image: imageURL,
+                    image: imageURL ?? "",
                     skill: skill.id ?? UUID(),
                     taskDescription: createRequest.taskDescription,
                     projectDescription: createRequest.projectDescription,
@@ -115,8 +148,6 @@ struct OrderController: RouteCollection {
                 }
             }
         }
-        
-        
     }
     
     func updateOrder(req: Request) throws -> EventLoopFuture<HTTPStatus> {
@@ -242,7 +273,7 @@ struct OrderController: RouteCollection {
 
 struct OrderCreateRequest: Content {
     var title: String
-    var image: File
+    var image: File?
     var skill: String
     var taskDescription: String
     var projectDescription: String
@@ -250,7 +281,7 @@ struct OrderCreateRequest: Content {
     var tools: [String]
     var dataStart: Date
     var dataEnd: Date
-    var files: [File]
+    var files: [File]?
 }
 
 struct OrderUpdateRequest: Content {
@@ -263,4 +294,10 @@ struct OrderUpdateRequest: Content {
     var dataStart: Date?
     var dataEnd: Date?
     var files: [File]?
+}
+
+struct OrderWithUserAndTools: Content {
+    let order: Order
+    let user: User
+    let tools: [Tool]
 }

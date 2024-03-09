@@ -12,6 +12,7 @@ struct ToolController: RouteCollection {
     func boot(routes: RoutesBuilder) throws {
         let toolsRoute = routes.grouped("tools")
         toolsRoute.post(use: create)
+        toolsRoute.post("array", use: createArray)
         toolsRoute.get(":toolID", use: get)
         toolsRoute.get(use: getAll)
         toolsRoute.put(":toolID", use: update)
@@ -28,6 +29,18 @@ struct ToolController: RouteCollection {
     func create(req: Request) throws -> EventLoopFuture<Tool> {
         let tool = try req.content.decode(Tool.self)
         return tool.save(on: req.db).map { tool }
+    }
+    
+    // Создание массива скиллов
+    func createArray(req: Request) throws -> EventLoopFuture<HTTPStatus> {
+        let tools = try req.content.decode([Tool].self)
+        
+        return req.db.transaction { db in
+            let saveFutures = tools.map { tool in
+                tool.save(on: db)
+            }
+            return EventLoopFuture<Void>.andAllSucceed(saveFutures, on: req.eventLoop)
+        }.transform(to: .created)
     }
     
     // Get a tool by ID

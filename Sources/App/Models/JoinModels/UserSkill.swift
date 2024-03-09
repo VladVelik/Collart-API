@@ -6,6 +6,9 @@ final class UserSkill: Model {
 
     @ID(key: .id)
     var id: UUID?
+    
+    @Field(key: "primary")
+    var primary: Bool
 
     @Parent(key: "user_id")
     var user: User
@@ -15,8 +18,9 @@ final class UserSkill: Model {
 
     init() {}
 
-    init(id: UUID? = nil, userID: UUID, skillID: UUID) {
+    init(id: UUID? = nil, primary: Bool, userID: UUID, skillID: UUID) {
         self.id = id
+        self.primary = primary
         self.$user.id = userID
         self.$skill.id = skillID
     }

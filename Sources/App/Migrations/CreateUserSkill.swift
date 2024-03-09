@@ -6,6 +6,7 @@ struct CreateUserSkill: Migration {
             .id()
             .field("user_id", .uuid, .required, .references("users", "id"))
             .field("skill_id", .uuid, .required, .references("skills", "id"))
+            .field("primary", .bool, .required)
             .create()
     }
 
