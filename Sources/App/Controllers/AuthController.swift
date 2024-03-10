@@ -99,23 +99,57 @@ struct AuthController: RouteCollection {
         return try req.jwt.sign(payload)
     }
     
-    func getUser(_ req: Request) throws -> EventLoopFuture<UserWithSkills> {
+    func getUser(_ req: Request) throws -> EventLoopFuture<UserWithSkillsAndTools> {
         let user = try req.auth.require(User.self)
 
-        return user.$skills.query(on: req.db).all().map { skills in
-            let skillNames = skills.map { SkillNames(nameEn: $0.nameEn, nameRu: $0.nameRu) }
+        return UserSkill.query(on: req.db)
+            .filter(\.$user.$id == user.id!)
+            .all()
+            .flatMap { userSkills in
+                let skillIDs = userSkills.map { $0.$skill.id }
 
-            let userPublic = user.asPublic()
-            return UserWithSkills(user: userPublic, skills: skillNames)
-        }
+                let skillsFuture = Skill.query(on: req.db)
+                    .filter(\.$id ~~ skillIDs)
+                    .all()
+
+                let toolsFuture = UserTool.query(on: req.db)
+                    .filter(\.$user.$id == user.id!)
+                    .all()
+                    .flatMap { userTools in
+                        let toolIDs = userTools.map { $0.$tool.id }
+                        return Tool.query(on: req.db)
+                            .filter(\.$id ~~ toolIDs)
+                            .all()
+                    }
+
+                return skillsFuture.and(toolsFuture).map { (skills, tools) in
+                    let skillNames = userSkills.compactMap { userSkill -> SkillNames? in
+                        guard let skill = skills.first(where: { $0.id == userSkill.$skill.id }) else {
+                            return nil
+                        }
+                        return SkillNames(
+                            nameEn: skill.nameEn,
+                            primary: userSkill.primary,
+                            nameRu: skill.nameRu
+                        )
+                    }
+
+                    let toolNames = tools.map { $0.name } // Предполагается, что у Tool есть свойство name
+
+                    let userPublic = user.asPublic()
+                    return UserWithSkillsAndTools(user: userPublic, skills: skillNames, tools: toolNames)
+                }
+            }
     }
 }
 
 struct SkillNames: Content {
     var nameEn: String
+    var primary: Bool
     var nameRu: String
 }
-struct UserWithSkills: Content {
+struct UserWithSkillsAndTools: Content {
     let user: User.Public
     let skills: [SkillNames]
+    let tools: [String]
 }

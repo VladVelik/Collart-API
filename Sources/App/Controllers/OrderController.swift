@@ -71,22 +71,40 @@ struct OrderController: RouteCollection {
     }
 
     // Получение деталей конкретного заказа текущего пользователя по ID
-    func getOrder(req: Request) throws -> EventLoopFuture<Order> {
+    func getOrder(req: Request) throws -> EventLoopFuture<OrderWithUserAndTools> {
         let userID = try req.auth.require(User.self).requireID()
-        guard req.parameters.get("orderID", as: UUID.self) != nil else {
+        guard let orderID = req.parameters.get("orderID", as: UUID.self) else {
             throw Abort(.badRequest, reason: "Order ID is missing or invalid")
         }
+        
         return Order.query(on: req.db)
             .filter(\.$owner.$id == userID)
+            .filter(\.$id == orderID)
+            .with(\.$owner)
             .first()
             .unwrap(or: Abort(.notFound))
+            .flatMap { order in
+                order.$tools.query(on: req.db).all().map { tools in
+                    OrderWithUserAndTools(order: order, user: order.owner, tools: tools)
+                }
+            }
     }
+
 
     
     func addOrder(req: Request) throws -> EventLoopFuture<HTTPStatus> {
         let userID = try req.auth.require(User.self).requireID()
         let createRequest = try req.content.decode(OrderCreateRequest.self)
         
+        let skillLookup = Skill.query(on: req.db)
+            .group(.or) { or in
+                or.filter(\Skill.$nameEn == createRequest.skill)
+                or.filter(\Skill.$nameRu == createRequest.skill)
+            }
+            .first()
+            //.unwrap(or: Abort(.badRequest, reason: "Skill not found"))
+        
+
         // Сначала загрузим изображение заказа на Cloudinary
         let imageUpload: EventLoopFuture<String?> = try createRequest.image.map {
                 try cloudinaryService.upload(file: $0, on: req).map(Optional.some)
@@ -96,15 +114,6 @@ struct OrderController: RouteCollection {
             try cloudinaryService.upload(file: $0, on: req)
         } ?? []
         
-        // Найдем Skill по имени
-        let skillLookup = Skill.query(on: req.db)
-            .group(.or) { or in
-                or.filter(\Skill.$nameEn == createRequest.skill)
-                or.filter(\Skill.$nameRu == createRequest.skill)
-            }
-            .first()
-            .unwrap(or: Abort(.badRequest, reason: "Skill not found"))
-        
         
         return imageUpload.and(skillLookup).flatMap { (imageURL, skill) in
             filesUploads.flatten(on: req.eventLoop).flatMap { filesURLs in
@@ -113,7 +122,7 @@ struct OrderController: RouteCollection {
                     ownerID: userID,
                     title: createRequest.title,
                     image: imageURL ?? "",
-                    skill: skill.id ?? UUID(),
+                    skill: skill?.id ?? UUID(),
                     taskDescription: createRequest.taskDescription,
                     projectDescription: createRequest.projectDescription,
                     experience: createRequest.experience,
