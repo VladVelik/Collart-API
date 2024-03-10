@@ -23,7 +23,7 @@ struct OrderController: RouteCollection {
             tokenProtected.post("addOrder", use: addOrder)
             tokenProtected.put(":orderId", use: updateOrder)
             tokenProtected.get("myOrders", use: getAllUserOrders)
-            tokenProtected.get("allOrders", use: getAllOrders)
+            //tokenProtected.get("allOrders", use: getAllOrders)
             tokenProtected.get("myOrders", ":orderID", use: getOrder)
             tokenProtected.delete(":orderId", use: deleteOrder)
             
@@ -33,7 +33,7 @@ struct OrderController: RouteCollection {
     }
     
     // Получение списка всех заказов текущего пользователя
-    func getAllUserOrders(req: Request) throws -> EventLoopFuture<[OrderWithUserAndTools]> {
+    func getAllUserOrders(req: Request) throws -> EventLoopFuture<[OrderWithUserAndToolsAndSkill]> {
         let userID = try req.auth.require(User.self).requireID()
 
         return Order.query(on: req.db)
@@ -41,32 +41,40 @@ struct OrderController: RouteCollection {
             .with(\.$owner)
             .all()
             .flatMap { orders in
-                let toolsFutures = orders.map { order in
-                    order.$tools.query(on: req.db).all().map { (order, $0) }
-                }
-                
-                return toolsFutures.flatten(on: req.eventLoop).map { results in
-                    results.map { order, tools in
-                        OrderWithUserAndTools(order: order, user: order.owner, tools: tools)
+                let orderDetailsFutures = orders.map { order in
+                    // Получаем инструменты для заказа
+                    let toolsFuture = order.$tools.query(on: req.db).all()
+
+                    // Получаем детали скилла, используя ID скилла в заказе
+                    let skillFuture = Skill.find(order.skill, on: req.db).unwrap(or: Abort(.notFound))
+
+                    return toolsFuture.and(skillFuture).map { tools, skill in
+                        // Создаём SkillNames для скилла
+                        let skillNames = SkillOrderNames(nameEn: skill.nameEn, nameRu: skill.nameRu)
+                        return OrderWithUserAndToolsAndSkill(order: order, user: order.owner, tools: tools.map { $0.name }, skill: skillNames)
                     }
                 }
+                return orderDetailsFutures.flatten(on: req.eventLoop)
             }
     }
+
     
-    func getAllOrders(req: Request) throws -> EventLoopFuture<[OrderWithUserAndTools]> {
+    func getAllOrders(req: Request) throws -> EventLoopFuture<[OrderWithUserAndToolsAndSkill]> {
         return Order.query(on: req.db)
             .with(\.$owner)
+            .filter(\.$isActive == true)
             .all()
             .flatMap { orders in
-                let toolsFutures = orders.map { order in
-                    order.$tools.query(on: req.db).all().map { (order, $0) }
-                }
-                
-                return toolsFutures.flatten(on: req.eventLoop).map { results in
-                    results.map { order, tools in
-                        OrderWithUserAndTools(order: order, user: order.owner, tools: tools)
+                let ordersWithToolsFutures = orders.map { order in
+                    let toolsFuture = order.$tools.query(on: req.db).all()
+                    let skillFuture = Skill.find(order.skill, on: req.db)
+                    
+                    return toolsFuture.and(skillFuture).map { tools, skill in
+                        let skillInfo = skill.map { SkillOrderNames(nameEn: $0.nameEn, nameRu: $0.nameRu) }
+                        return OrderWithUserAndToolsAndSkill(order: order, user: order.owner, tools: tools.map { $0.name }, skill: skillInfo)
                     }
                 }
+                return ordersWithToolsFutures.flatten(on: req.eventLoop)
             }
     }
 
@@ -309,4 +317,16 @@ struct OrderWithUserAndTools: Content {
     let order: Order
     let user: User
     let tools: [Tool]
+}
+
+struct OrderWithUserAndToolsAndSkill: Content {
+    var order: Order
+    var user: User
+    var tools: [String]
+    var skill: SkillOrderNames?
+}
+
+struct SkillOrderNames: Content {
+    var nameEn: String
+    var nameRu: String
 }
