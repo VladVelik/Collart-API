@@ -78,15 +78,13 @@ struct OrderController: RouteCollection {
             }
     }
 
-    // Получение деталей конкретного заказа текущего пользователя по ID
+    // Получение деталей конкретного заказа по ID
     func getOrder(req: Request) throws -> EventLoopFuture<OrderWithUserAndTools> {
-        let userID = try req.auth.require(User.self).requireID()
         guard let orderID = req.parameters.get("orderID", as: UUID.self) else {
             throw Abort(.badRequest, reason: "Order ID is missing or invalid")
         }
-        
+
         return Order.query(on: req.db)
-            .filter(\.$owner.$id == userID)
             .filter(\.$id == orderID)
             .with(\.$owner)
             .first()
@@ -97,7 +95,6 @@ struct OrderController: RouteCollection {
                 }
             }
     }
-
 
     
     func addOrder(req: Request) throws -> EventLoopFuture<HTTPStatus> {
