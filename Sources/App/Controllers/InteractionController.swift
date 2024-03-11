@@ -34,36 +34,112 @@ struct InteractionController: RouteCollection {
             senderID: senderID,
             orderID: orderID,
             getterID: getterID,
-            status: .active // Устанавливаем статус активный
+            status: .active
         )
         return interaction.save(on: req.db).map { interaction }
     }
     
     // Получение интеракции по ID
-    func getInteraction(req: Request) throws -> EventLoopFuture<Interaction> {
+    func getInteraction(req: Request) throws -> EventLoopFuture<Interaction.FullInteraction> {
         let interactionID = try req.parameters.require("interactionID", as: UUID.self)
         return Interaction.find(interactionID, on: req.db)
             .unwrap(or: Abort(.notFound))
+            .flatMap { interaction in
+                let senderFuture = User.find(interaction.$sender.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
+                    self.loadFullUser(user, req: req)
+                }
+                let getterFuture = User.find(interaction.$getter.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
+                    self.loadFullUser(user, req: req)
+                }
+                let orderFuture = Order.find(interaction.$order.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { order in
+                    self.loadFullOrder(order, req: req)
+                }
+                
+                return senderFuture.and(getterFuture).and(orderFuture).flatMap { result in
+                    let (sender, getter, fullOrder) = (result.0.0, result.0.1, result.1)
+                    let fullInteraction = Interaction.FullInteraction(
+                        id: interaction.id,
+                        sender: sender,
+                        getter: getter,
+                        order: fullOrder,
+                        status: interaction.status
+                    )
+                    return req.eventLoop.makeSucceededFuture(fullInteraction)
+                }
+            }
     }
 
+
     // Получение всех интеракций, где пользователь является отправителем
-    func getSentInteractions(req: Request) throws -> EventLoopFuture<[Interaction]> {
+    func getSentInteractions(req: Request) throws -> EventLoopFuture<[Interaction.FullInteraction]> {
         let senderID = try req.parameters.require("userID", as: UUID.self)
         return Interaction.query(on: req.db)
             .filter(\.$sender.$id == senderID)
             .all()
+            .flatMap { interactions in
+                let fullInteractionsFutures = interactions.map { interaction in
+                    let senderFuture = User.find(interaction.$sender.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
+                        self.loadFullUser(user, req: req)
+                    }
+                    let getterFuture = User.find(interaction.$getter.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
+                        self.loadFullUser(user, req: req)
+                    }
+                    let orderFuture = Order.find(interaction.$order.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { order in
+                        self.loadFullOrder(order, req: req)
+                    }
+                    
+                    return senderFuture.and(getterFuture).and(orderFuture).flatMap { result in
+                        let (sender, getter, fullOrder) = (result.0.0, result.0.1, result.1)
+                        let fullInteraction = Interaction.FullInteraction(
+                            id: interaction.id,
+                            sender: sender,
+                            getter: getter,
+                            order: fullOrder,
+                            status: interaction.status
+                        )
+                        return req.eventLoop.makeSucceededFuture(fullInteraction)
+                    }
+                }
+                return fullInteractionsFutures.flatten(on: req.eventLoop)
+            }
+        
     }
 
     // Получение всех интеракций, где пользователь является получателем
-    func getReceivedInteractions(req: Request) throws -> EventLoopFuture<[Interaction]> {
+    func getReceivedInteractions(req: Request) throws -> EventLoopFuture<[Interaction.FullInteraction]> {
         let getterID = try req.parameters.require("userID", as: UUID.self)
         return Interaction.query(on: req.db)
             .filter(\.$getter.$id == getterID)
             .all()
+            .flatMap { interactions in
+                let fullInteractionsFutures = interactions.map { interaction in
+                    let senderFuture = User.find(interaction.$sender.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
+                        self.loadFullUser(user, req: req)
+                    }
+                    let getterFuture = User.find(interaction.$getter.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
+                        self.loadFullUser(user, req: req)
+                    }
+                    let orderFuture = Order.find(interaction.$order.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { order in
+                        self.loadFullOrder(order, req: req)
+                    }
+                    
+                    return senderFuture.and(getterFuture).and(orderFuture).flatMap { result in
+                        let (sender, getter, fullOrder) = (result.0.0, result.0.1, result.1)
+                        let fullInteraction = Interaction.FullInteraction(
+                            id: interaction.id,
+                            sender: sender,
+                            getter: getter,
+                            order: fullOrder,
+                            status: interaction.status
+                        )
+                        return req.eventLoop.makeSucceededFuture(fullInteraction)
+                    }
+                }
+                return fullInteractionsFutures.flatten(on: req.eventLoop)
+            }
     }
     
-    // Получение всех интеракций, где пользователь является отправителем или получателем
-    func getAllUserInteractions(req: Request) throws -> EventLoopFuture<[Interaction]> {
+    func getAllUserInteractions(req: Request) throws -> EventLoopFuture<[Interaction.FullInteraction]> {
         let userID = try req.parameters.require("userID", as: UUID.self)
         
         return Interaction.query(on: req.db)
@@ -72,8 +148,33 @@ struct InteractionController: RouteCollection {
                 or.filter(\.$getter.$id == userID)
             }
             .all()
+            .flatMap { interactions in
+                let fullInteractionsFutures = interactions.map { interaction in
+                    let senderFuture = User.find(interaction.$sender.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
+                        self.loadFullUser(user, req: req)
+                    }
+                    let getterFuture = User.find(interaction.$getter.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
+                        self.loadFullUser(user, req: req)
+                    }
+                    let orderFuture = Order.find(interaction.$order.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { order in
+                        self.loadFullOrder(order, req: req)
+                    }
+                    
+                    return senderFuture.and(getterFuture).and(orderFuture).flatMap { result in
+                        let (sender, getter, fullOrder) = (result.0.0, result.0.1, result.1)
+                        let fullInteraction = Interaction.FullInteraction(
+                            id: interaction.id,
+                            sender: sender,
+                            getter: getter,
+                            order: fullOrder,
+                            status: interaction.status
+                        )
+                        return req.eventLoop.makeSucceededFuture(fullInteraction)
+                    }
+                }
+                return fullInteractionsFutures.flatten(on: req.eventLoop)
+            }
     }
-
 
 
     // Изменение статуса интеракции на "rejected"
@@ -83,7 +184,7 @@ struct InteractionController: RouteCollection {
         
         return Interaction.find(interactionID, on: req.db)
             .unwrap(or: Abort(.notFound))
-            .flatMapThrowing { interaction in // Используйте flatMapThrowing для работы с исключениями
+            .flatMapThrowing { interaction in
                 guard interaction.$getter.id == requesterData.getterID else {
                     throw Abort(.unauthorized, reason: "Только получатель может отклонить интеракцию.")
                 }
@@ -102,9 +203,9 @@ struct InteractionController: RouteCollection {
 
         return Interaction.query(on: req.db)
             .filter(\.$id == interactionID)
-            .with(\.$getter) // Загружаем связь с getter
-            .with(\.$sender) // Загружаем связь с sender
-            .with(\.$order) // Загружаем связь с order
+            .with(\.$getter)
+            .with(\.$sender)
+            .with(\.$order)
             .first()
             .unwrap(or: Abort(.notFound))
             .flatMap { interaction in
@@ -115,13 +216,11 @@ struct InteractionController: RouteCollection {
 
                 return interaction.save(on: req.db)
                     .flatMap { _ -> EventLoopFuture<Void> in
-                        // Помечаем заказ как неактивный
                         let order = interaction.order
                         order.isActive = false
                         return order.save(on: req.db)
                     }
                     .flatMap {
-                        // Удаляем все остальные интеракции, связанные с этим заказом
                         Interaction.query(on: req.db)
                             .filter(\.$order.$id == interaction.order.id ?? UUID())
                             .filter(\.$id != interactionID) // Исключаем текущую интеракцию
@@ -173,6 +272,66 @@ struct InteractionController: RouteCollection {
 
 }
 
+extension InteractionController {
+    private func loadFullOrder(_ order: Order, req: Request) -> EventLoopFuture<Order.FullOrder> {
+        let skillsFuture = Skill.find(order.skill, on: req.db)
+        let toolsFuture = order.$tools.query(on: req.db).all()
+        
+        return skillsFuture.and(toolsFuture).map { (skills, tools) in
+            return Order.FullOrder(
+                id: order.id!,
+                title: order.title,
+                image: order.image,
+                taskDescription: order.taskDescription,
+                projectDescription: order.projectDescription,
+                skills: skills,
+                tools: tools
+            )
+        }
+    }
+    
+    private func loadFullUser(_ user: User, req: Request) -> EventLoopFuture<UserWithSkillsAndTools> {
+        let userSkillsFuture = UserSkill.query(on: req.db)
+            .filter(\.$user.$id == user.id!)
+            .all()
+        
+        let userToolsFuture = UserTool.query(on: req.db)
+            .filter(\.$user.$id == user.id!)
+            .all()
+            .flatMap { userTools in
+                let toolIDs = userTools.map { $0.$tool.id }
+                return Tool.query(on: req.db)
+                    .filter(\.$id ~~ toolIDs)
+                    .all()
+            }
+        
+        return userSkillsFuture.and(userToolsFuture).flatMap { (userSkills, tools) in
+            let skillIDs = userSkills.map { $0.$skill.id }
+            let skillsFuture = Skill.query(on: req.db)
+                .filter(\.$id ~~ skillIDs)
+                .all()
+            
+            return skillsFuture.flatMap { skills in
+                let skillNames = userSkills.compactMap { userSkill -> SkillNames? in
+                    guard let skill = skills.first(where: { $0.id == userSkill.$skill.id }) else {
+                        return nil
+                    }
+                    return SkillNames(
+                        nameEn: skill.nameEn,
+                        primary: userSkill.primary,
+                        nameRu: skill.nameRu
+                    )
+                }
+                
+                let toolNames = tools.map { $0.name }
+                
+                let userPublic = user.asPublic()
+                return req.eventLoop.makeSucceededFuture(UserWithSkillsAndTools(user: userPublic, skills: skillNames, tools: toolNames))
+            }
+        }
+    }
+}
+
 struct CreateRequest: Content {
     var senderID: UUID?
     var orderID: UUID?
@@ -186,5 +345,25 @@ extension Interaction {
     
     struct Sender: Content {
         var senderID: UUID
+    }
+    
+    struct FullInteraction: Content {
+        var id: UUID?
+        var sender: UserWithSkillsAndTools
+        var getter: UserWithSkillsAndTools
+        var order: Order.FullOrder
+        var status: Status
+    }
+}
+
+extension Order {
+    struct FullOrder: Content {
+        var id: UUID
+        var title: String
+        var image: String
+        var taskDescription: String
+        var projectDescription: String
+        var skills: Skill?
+        var tools: [Tool]
     }
 }
