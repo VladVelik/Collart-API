@@ -30,10 +30,57 @@ struct UserController: RouteCollection {
         tokenProtected.put("updateUser", use: updateUser)
     }
     
-    func get(req: Request) throws -> EventLoopFuture<User> {
-        User.find(req.parameters.get("userID"), on: req.db)
-            .unwrap(or: Abort(.notFound))
+    func get(req: Request) throws -> EventLoopFuture<UserWithSkillsAndTools> {
+        guard let userID = req.parameters.get("userID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "User ID is required")
+        }
+
+        return User.find(userID, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
+            let skillsFuture = UserSkill.query(on: req.db)
+                .filter(\.$user.$id == user.id!)
+                .all()
+                .flatMap { userSkills -> EventLoopFuture<([SkillNames], User)> in
+                    let skillIDs = userSkills.map { $0.$skill.id }
+                    return Skill.query(on: req.db)
+                        .filter(\.$id ~~ skillIDs)
+                        .all()
+                        .map { skills -> ([SkillNames], User) in
+                            let skillDict = Dictionary(uniqueKeysWithValues: skills.map { ($0.id!, $0) })
+                            let skillNames = userSkills.compactMap { userSkill -> SkillNames? in
+                                guard let skill = skillDict[userSkill.$skill.id] else {
+                                    return nil
+                                }
+                                return SkillNames(
+                                    nameEn: skill.nameEn,
+                                    primary: userSkill.primary,
+                                    nameRu: skill.nameRu
+                                )
+                            }
+                            return (skillNames, user)
+                        }
+                }
+            
+            let toolsFuture = UserTool.query(on: req.db)
+                .filter(\.$user.$id == user.id!)
+                .all()
+                .flatMap { userTools -> EventLoopFuture<[String]> in
+                    let toolIDs = userTools.map { $0.$tool.id }
+                    return Tool.query(on: req.db)
+                        .filter(\.$id ~~ toolIDs)
+                        .all()
+                        .map { tools in
+                            tools.map { $0.name }
+                        }
+                }
+            
+            return skillsFuture.and(toolsFuture).map { (skillNamesAndUser, toolNames) in
+                let (skillNames, user) = skillNamesAndUser
+                let userPublic = user.asPublic()
+                return UserWithSkillsAndTools(user: userPublic, skills: skillNames, tools: toolNames)
+            }
+        }
     }
+
     
     func update(req: Request) throws -> EventLoopFuture<User> {
         let updatedUserData = try req.content.decode(User.self)
