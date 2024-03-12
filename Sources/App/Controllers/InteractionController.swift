@@ -254,7 +254,6 @@ struct InteractionController: RouteCollection {
             }
     }
 
-
     // Изменение статуса интеракции на "rejected"
     func rejectInteraction(req: Request) throws -> EventLoopFuture<HTTPStatus> {
         let interactionID = try req.parameters.require("interactionID", as: UUID.self)
