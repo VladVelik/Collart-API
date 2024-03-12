@@ -23,7 +23,6 @@ struct OrderController: RouteCollection {
             tokenProtected.post("addOrder", use: addOrder)
             tokenProtected.put(":orderId", use: updateOrder)
             tokenProtected.get("myOrders", use: getAllUserOrders)
-            //tokenProtected.get("allOrders", use: getAllOrders)
             tokenProtected.get("myOrders", ":orderID", use: getOrder)
             tokenProtected.delete(":orderId", use: deleteOrder)
             
@@ -58,40 +57,32 @@ struct OrderController: RouteCollection {
             }
     }
 
-    
-    func getAllOrders(req: Request) throws -> EventLoopFuture<[OrderWithUserAndToolsAndSkill]> {
-        return Order.query(on: req.db)
-            .with(\.$owner)
-            .filter(\.$isActive == true)
-            .all()
-            .flatMap { orders in
-                let ordersWithToolsFutures = orders.map { order in
-                    let toolsFuture = order.$tools.query(on: req.db).all()
-                    let skillFuture = Skill.find(order.skill, on: req.db)
-                    
-                    return toolsFuture.and(skillFuture).map { tools, skill in
-                        let skillInfo = skill.map { SkillOrderNames(nameEn: $0.nameEn, nameRu: $0.nameRu) }
-                        return OrderWithUserAndToolsAndSkill(order: order, user: order.owner, tools: tools.map { $0.name }, skill: skillInfo)
-                    }
-                }
-                return ordersWithToolsFutures.flatten(on: req.eventLoop)
-            }
-    }
-
     // Получение деталей конкретного заказа по ID
-    func getOrder(req: Request) throws -> EventLoopFuture<OrderWithUserAndTools> {
+    func getOrder(req: Request) throws -> EventLoopFuture<OrderWithUserAndToolsAndSkill> {
         guard let orderID = req.parameters.get("orderID", as: UUID.self) else {
             throw Abort(.badRequest, reason: "Order ID is missing or invalid")
         }
-
+        
         return Order.query(on: req.db)
             .filter(\.$id == orderID)
             .with(\.$owner)
             .first()
             .unwrap(or: Abort(.notFound))
             .flatMap { order in
-                order.$tools.query(on: req.db).all().map { tools in
-                    OrderWithUserAndTools(order: order, user: order.owner, tools: tools)
+                let toolsFuture = order.$tools.query(on: req.db).all()
+                let skillFuture = Skill.find(order.skill, on: req.db).unwrap(or: Abort(.notFound))
+                
+                return toolsFuture.and(skillFuture).flatMap { (tools, skill) in
+                    let userFuture = User.find(order.$owner.id, on: req.db).unwrap(or: Abort(.notFound))
+                    return userFuture.map { user in
+                        let skillNames = SkillOrderNames(nameEn: skill.nameEn, nameRu: skill.nameRu)
+                        return OrderWithUserAndToolsAndSkill(
+                            order: order,
+                            user: order.owner,
+                            tools: tools.map { $0.name },
+                            skill: skillNames
+                        )
+                    }
                 }
             }
     }

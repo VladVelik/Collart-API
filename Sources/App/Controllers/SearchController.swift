@@ -10,16 +10,20 @@ import Fluent
 
 struct SearchController: RouteCollection {
     func boot(routes: RoutesBuilder) throws {
-        let searchRoute = routes.grouped("search")
-        searchRoute.get("users", "all", use: getAllUsers)
-        searchRoute.get("orders", "all", use: getAllOrders)
-        searchRoute.get("filteredOrders", use: getFilteredOrders)
-        searchRoute.get("filteredUsers", use: getFilteredUsers)
+        routes.group("search") { search in
+            let tokenProtected = search.grouped(JWTMiddleware())
+            tokenProtected.get("users", "all", use: getAllUsers)
+            tokenProtected.get("orders", "all", use: getAllOrders)
+            tokenProtected.get("filteredOrders", use: getFilteredOrders)
+            tokenProtected.get("filteredUsers", use: getFilteredUsers)
+        }
     }
     
     func getAllUsers(req: Request) throws -> EventLoopFuture<[UserWithSkillsAndTools]> {
+        let currentUser = try req.auth.require(User.self)
         return User.query(on: req.db)
             .filter(\.$searchable == true)
+            .filter(\.$id != currentUser.id!)
             .all()
             .flatMap { searchableUsers in
                 let usersWithSkillsAndToolsFutures = searchableUsers.map { user -> EventLoopFuture<UserWithSkillsAndTools> in
@@ -75,25 +79,37 @@ struct SearchController: RouteCollection {
 
     
     func getAllOrders(req: Request) throws -> EventLoopFuture<[OrderWithUserAndToolsAndSkill]> {
+        let currentUserID = try req.auth.require(User.self).requireID()
+        
         return Order.query(on: req.db)
-            .with(\.$owner)
             .filter(\.$isActive == true)
+            .with(\.$owner)
             .all()
             .flatMap { orders in
-                let ordersWithToolsFutures = orders.map { order in
+                let filteredOrders = orders.filter { $0.$owner.id != currentUserID }
+                
+                let ordersWithDetailsFutures = filteredOrders.map { order in
                     let toolsFuture = order.$tools.query(on: req.db).all()
-                    let skillFuture = Skill.find(order.skill, on: req.db)
+                    let skillFuture = Skill.find(order.skill, on: req.db).unwrap(or: Abort(.notFound))
                     
-                    return toolsFuture.and(skillFuture).map { tools, skill in
-                        let skillInfo = skill.map { SkillOrderNames(nameEn: $0.nameEn, nameRu: $0.nameRu) }
-                        return OrderWithUserAndToolsAndSkill(order: order, user: order.owner, tools: tools.map { $0.name }, skill: skillInfo)
+                    return toolsFuture.and(skillFuture).map { (tools, skill) in
+                        let toolNames = tools.map { $0.name }
+                        let skillNames = SkillOrderNames(nameEn: skill.nameEn, nameRu: skill.nameRu)
+                        return OrderWithUserAndToolsAndSkill(
+                            order: order,
+                            user: order.owner,
+                            tools: toolNames,
+                            skill: skillNames
+                        )
                     }
                 }
-                return ordersWithToolsFutures.flatten(on: req.eventLoop)
+                return ordersWithDetailsFutures.flatten(on: req.eventLoop)
             }
     }
+
     
     func getFilteredOrders(req: Request) throws -> EventLoopFuture<[OrderWithUserAndToolsAndSkill]> {
+        let currentUserID = try req.auth.require(User.self).requireID()
         let skillNames = req.query[[String].self, at: "skills"] ?? []
         let toolNames = req.query[[String].self, at: "tools"] ?? []
         let experienceFilter: ExperienceType? = req.query[ExperienceType.self, at: "experience"]
@@ -139,7 +155,9 @@ struct SearchController: RouteCollection {
                 .with(\.$owner)
                 .all()
                 .flatMap { orders in
-                    let ordersWithDetailsFutures = orders.map { order in
+                    let filteredOrders = orders.filter { $0.$owner.id != currentUserID }
+                    
+                    let ordersWithDetailsFutures = filteredOrders.map { order in
                         let toolsFuture = order.$tools.query(on: req.db).all()
                         let skillFuture = Skill.find(order.skill, on: req.db)
 
@@ -155,11 +173,14 @@ struct SearchController: RouteCollection {
 
 
     func getFilteredUsers(req: Request) throws -> EventLoopFuture<[UserWithSkillsAndTools]> {
-        let skillNames = req.query[[String].self, at: "skills"] ?? []
-        let toolNames = req.query[[String].self, at: "tools"] ?? []
+        //let skillNames = req.query[[String].self, at: "skills"] ?? []
+        //let toolNames = req.query[[String].self, at: "tools"] ?? []
+        let currentUser = try req.auth.require(User.self)
         let experienceFilter: ExperienceType? = req.query[ExperienceType.self, at: "experience"]
 
-        var query = User.query(on: req.db).filter(\.$searchable == true)
+        var query = User.query(on: req.db)
+            .filter(\.$searchable == true)
+            .filter(\.$id != currentUser.id!)
 
         if let experience = experienceFilter {
             query = query.filter(\.$experience == experience)

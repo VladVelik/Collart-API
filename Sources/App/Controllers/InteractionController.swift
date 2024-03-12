@@ -10,18 +10,22 @@ import Vapor
 
 struct InteractionController: RouteCollection {
     func boot(routes: RoutesBuilder) throws {
-        let interactionsRoute = routes.grouped("interactions")
-        interactionsRoute.post(use: createInteraction)
-        interactionsRoute.get(":interactionID", use: getInteraction)
-        interactionsRoute.get("sent", ":userID", use: getSentInteractions)
-        interactionsRoute.get("received", ":userID", use: getReceivedInteractions)
-        interactionsRoute.get("user", ":userID", use: getAllUserInteractions)
-        interactionsRoute.post("reject", ":interactionID", use: rejectInteraction)
-        interactionsRoute.post("accept", ":interactionID", use: acceptInteraction)
-        interactionsRoute.delete(":interactionID", use: deleteInteraction)
-        
-        interactionsRoute.get("owned", ":userID", use: getInteractionsForUserOwnedOrders)
-       // interactionsRoute.get("invites", "owned", ":userID", use: getInteractionsForUserOwnedOrdersAsSender)
+        routes.group("interactions") { interaction in
+            let tokenProtected = interaction.grouped(JWTMiddleware())
+            tokenProtected.post(use: createInteraction)
+            tokenProtected.get(":interactionID", use: getInteraction)
+            tokenProtected.get("sent", use: getSentInteractions)
+            tokenProtected.get("received", use: getReceivedInteractions)
+            tokenProtected.get("user", ":userID", use: getAllUserInteractions)
+            tokenProtected.post("reject", ":interactionID", use: rejectInteraction)
+            tokenProtected.post("accept", ":interactionID", use: acceptInteraction)
+            tokenProtected.delete(":interactionID", use: deleteInteraction)
+            
+            tokenProtected.get("owned", use: getInteractionsForUserOwnedOrders)
+            tokenProtected.get("invites", "owned", use: getInteractionsForUserOwnedOrdersAsSender)
+            tokenProtected.get("unowned", use: getInteractionsForUserUnownedOrders)
+            tokenProtected.get("invites", "unowned", use: getInteractionsForUserUnownedOrdersAsSender)
+        }
     }
 
     // Создание интеракции
@@ -48,96 +52,36 @@ struct InteractionController: RouteCollection {
         return Interaction.find(interactionID, on: req.db)
             .unwrap(or: Abort(.notFound))
             .flatMap { interaction in
-                let senderFuture = User.find(interaction.$sender.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
-                    self.loadFullUser(user, req: req)
-                }
-                let getterFuture = User.find(interaction.$getter.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
-                    self.loadFullUser(user, req: req)
-                }
-                let orderFuture = Order.find(interaction.$order.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { order in
-                    self.loadFullOrder(order, req: req)
-                }
-                
-                return senderFuture.and(getterFuture).and(orderFuture).flatMap { result in
-                    let (sender, getter, fullOrder) = (result.0.0, result.0.1, result.1)
-                    let fullInteraction = Interaction.FullInteraction(
-                        id: interaction.id,
-                        sender: sender,
-                        getter: getter,
-                        order: fullOrder,
-                        status: interaction.status
-                    )
-                    return req.eventLoop.makeSucceededFuture(fullInteraction)
-                }
+                self.createFullInteraction(from: interaction, req: req)
             }
     }
 
 
     // Получение всех интеракций, где пользователь является отправителем
     func getSentInteractions(req: Request) throws -> EventLoopFuture<[Interaction.FullInteraction]> {
-        let senderID = try req.parameters.require("userID", as: UUID.self)
+        let senderID = try req.auth.require(User.self).requireID()
         return Interaction.query(on: req.db)
             .filter(\.$sender.$id == senderID)
             .all()
             .flatMap { interactions in
                 let fullInteractionsFutures = interactions.map { interaction in
-                    let senderFuture = User.find(interaction.$sender.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
-                        self.loadFullUser(user, req: req)
-                    }
-                    let getterFuture = User.find(interaction.$getter.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
-                        self.loadFullUser(user, req: req)
-                    }
-                    let orderFuture = Order.find(interaction.$order.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { order in
-                        self.loadFullOrder(order, req: req)
-                    }
-                    
-                    return senderFuture.and(getterFuture).and(orderFuture).flatMap { result in
-                        let (sender, getter, fullOrder) = (result.0.0, result.0.1, result.1)
-                        let fullInteraction = Interaction.FullInteraction(
-                            id: interaction.id,
-                            sender: sender,
-                            getter: getter,
-                            order: fullOrder,
-                            status: interaction.status
-                        )
-                        return req.eventLoop.makeSucceededFuture(fullInteraction)
-                    }
+                    self.createFullInteraction(from: interaction, req: req)
                 }
                 return fullInteractionsFutures.flatten(on: req.eventLoop)
             }
-        
     }
-
+    
     // Получение всех интеракций, где пользователь является получателем
     func getReceivedInteractions(req: Request) throws -> EventLoopFuture<[Interaction.FullInteraction]> {
-        let getterID = try req.parameters.require("userID", as: UUID.self)
+        let getterID = try req.auth.require(User.self).requireID()
         return Interaction.query(on: req.db)
             .filter(\.$getter.$id == getterID)
             .all()
             .flatMap { interactions in
                 let fullInteractionsFutures = interactions.map { interaction in
-                    let senderFuture = User.find(interaction.$sender.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
-                        self.loadFullUser(user, req: req)
-                    }
-                    let getterFuture = User.find(interaction.$getter.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
-                        self.loadFullUser(user, req: req)
-                    }
-                    let orderFuture = Order.find(interaction.$order.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { order in
-                        self.loadFullOrder(order, req: req)
-                    }
-                    
-                    return senderFuture.and(getterFuture).and(orderFuture).flatMap { result in
-                        let (sender, getter, fullOrder) = (result.0.0, result.0.1, result.1)
-                        let fullInteraction = Interaction.FullInteraction(
-                            id: interaction.id,
-                            sender: sender,
-                            getter: getter,
-                            order: fullOrder,
-                            status: interaction.status
-                        )
-                        return req.eventLoop.makeSucceededFuture(fullInteraction)
-                    }
+                    self.createFullInteraction(from: interaction, req: req)
                 }
+                
                 return fullInteractionsFutures.flatten(on: req.eventLoop)
             }
     }
@@ -153,101 +97,96 @@ struct InteractionController: RouteCollection {
             .all()
             .flatMap { interactions in
                 let fullInteractionsFutures = interactions.map { interaction in
-                    let senderFuture = User.find(interaction.$sender.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
-                        self.loadFullUser(user, req: req)
-                    }
-                    let getterFuture = User.find(interaction.$getter.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
-                        self.loadFullUser(user, req: req)
-                    }
-                    let orderFuture = Order.find(interaction.$order.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { order in
-                        self.loadFullOrder(order, req: req)
-                    }
-                    
-                    return senderFuture.and(getterFuture).and(orderFuture).flatMap { result in
-                        let (sender, getter, fullOrder) = (result.0.0, result.0.1, result.1)
-                        let fullInteraction = Interaction.FullInteraction(
-                            id: interaction.id,
-                            sender: sender,
-                            getter: getter,
-                            order: fullOrder,
-                            status: interaction.status
-                        )
-                        return req.eventLoop.makeSucceededFuture(fullInteraction)
-                    }
+                    self.createFullInteraction(from: interaction, req: req)
                 }
                 return fullInteractionsFutures.flatten(on: req.eventLoop)
             }
     }
     
-    // Добавление метода в InteractionController
+    // Случай, когда на мой проект откликнулись
     func getInteractionsForUserOwnedOrders(req: Request) throws -> EventLoopFuture<[Interaction.FullInteraction]> {
-        let ownerID = try req.parameters.require("userID", as: UUID.self)
-        
+        let ownerID = try req.auth.require(User.self).requireID()
+
         return Order.query(on: req.db)
             .filter(\.$owner.$id == ownerID)
             .all()
             .flatMap { orders in
                 let orderIDs = orders.map { $0.id! }
                 return Interaction.query(on: req.db)
+                    .filter(\.$getter.$id == ownerID)
                     .filter(\.$order.$id ~~ orderIDs)
                     .all()
                     .flatMap { interactions in
                         let fullInteractionsFutures = interactions.map { interaction in
-                            let senderFuture = User.find(interaction.$sender.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
-                                self.loadFullUser(user, req: req)
-                            }
-                            let getterFuture = User.find(interaction.$getter.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
-                                self.loadFullUser(user, req: req)
-                            }
-                            let orderFuture = Order.find(interaction.$order.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { order in
-                                self.loadFullOrder(order, req: req)
-                            }
-                            
-                            return senderFuture.and(getterFuture).and(orderFuture).flatMap { result in
-                                let (sender, getter, fullOrder) = (result.0.0, result.0.1, result.1)
-                                let fullInteraction = Interaction.FullInteraction(
-                                    id: interaction.id,
-                                    sender: sender,
-                                    getter: getter,
-                                    order: fullOrder,
-                                    status: interaction.status
-                                )
-                                return req.eventLoop.makeSucceededFuture(fullInteraction)
-                            }
+                            self.createFullInteraction(from: interaction, req: req)
+                        }
+                        return fullInteractionsFutures.flatten(on: req.eventLoop)
+                    }
+            }
+    }
+
+    
+    // Случай, когда приглашаю на мой проект
+    func getInteractionsForUserOwnedOrdersAsSender(req: Request) throws -> EventLoopFuture<[Interaction.FullInteraction]> {
+        let ownerID = try req.auth.require(User.self).requireID()
+
+        return Order.query(on: req.db)
+            .filter(\.$owner.$id == ownerID)
+            .all()
+            .flatMap { orders in
+                let orderIDs = orders.map { $0.id! }
+                return Interaction.query(on: req.db)
+                    .filter(\.$sender.$id == ownerID)
+                    .filter(\.$order.$id ~~ orderIDs)
+                    .all()
+                    .flatMap { interactions in
+                        let fullInteractionsFutures = interactions.map { interaction in
+                            self.createFullInteraction(from: interaction, req: req)
                         }
                         return fullInteractionsFutures.flatten(on: req.eventLoop)
                     }
             }
     }
     
-    // Получение всех взаимодействий, где пользователь является отправителем и владельцем заказа
-    func getInteractionsForUserOwnedOrdersAsSender(req: Request) throws -> EventLoopFuture<[Interaction.FullInteraction]> {
-        let senderID = try req.parameters.require("userID", as: UUID.self)
-        
+    // Случай, когда иду на чей-то проект
+    func getInteractionsForUserUnownedOrders(req: Request) throws -> EventLoopFuture<[Interaction.FullInteraction]> {
+        let ownerID = try req.auth.require(User.self).requireID()
+
         return Order.query(on: req.db)
-            .filter(\.$owner.$id == senderID)
+            .filter(\.$owner.$id != ownerID)
             .all()
-            .flatMap { ownedOrders in
-                let ownedOrderIDs = ownedOrders.map { $0.id! }
-                
+            .flatMap { orders in
+                let orderIDs = orders.map { $0.id! }
                 return Interaction.query(on: req.db)
-                    .filter(\.$sender.$id == senderID)
-                    .filter(\.$order.$id ~~ ownedOrderIDs)
+                    .filter(\.$sender.$id == ownerID)
+                    .filter(\.$order.$id ~~ orderIDs)
                     .all()
                     .flatMap { interactions in
                         let fullInteractionsFutures = interactions.map { interaction in
-                            let getterFuture = self.loadFullUser(interaction.getter, req: req)
-                            let orderFuture = self.loadFullOrder(interaction.order, req: req)
+                            self.createFullInteraction(from: interaction, req: req)
+                        }
+                        return fullInteractionsFutures.flatten(on: req.eventLoop)
+                    }
+            }
+    }
 
-                            return getterFuture.and(orderFuture).map { (getter, fullOrder) in
-                                Interaction.FullInteraction(
-                                    id: interaction.id,
-                                    sender: UserWithSkillsAndTools(user: interaction.sender.asPublic(), skills: [], tools: []),
-                                    getter: getter,
-                                    order: fullOrder,
-                                    status: interaction.status
-                                )
-                            }
+    
+    // Случай, когда меня приглашают
+    func getInteractionsForUserUnownedOrdersAsSender(req: Request) throws -> EventLoopFuture<[Interaction.FullInteraction]> {
+        let ownerID = try req.auth.require(User.self).requireID()
+
+        return Order.query(on: req.db)
+            .filter(\.$owner.$id != ownerID)
+            .all()
+            .flatMap { orders in
+                let orderIDs = orders.map { $0.id! }
+                return Interaction.query(on: req.db)
+                    .filter(\.$getter.$id == ownerID)
+                    .filter(\.$order.$id ~~ orderIDs)
+                    .all()
+                    .flatMap { interactions in
+                        let fullInteractionsFutures = interactions.map { interaction in
+                            self.createFullInteraction(from: interaction, req: req)
                         }
                         return fullInteractionsFutures.flatten(on: req.eventLoop)
                     }
@@ -405,6 +344,30 @@ extension InteractionController {
                 let userPublic = user.asPublic()
                 return req.eventLoop.makeSucceededFuture(UserWithSkillsAndTools(user: userPublic, skills: skillNames, tools: toolNames))
             }
+        }
+    }
+    
+    private func createFullInteraction(from interaction: Interaction, req: Request) -> EventLoopFuture<Interaction.FullInteraction> {
+        let senderFuture = User.find(interaction.$sender.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
+            self.loadFullUser(user, req: req)
+        }
+        let getterFuture = User.find(interaction.$getter.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
+            self.loadFullUser(user, req: req)
+        }
+        let orderFuture = Order.find(interaction.$order.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { order in
+            self.loadFullOrder(order, req: req)
+        }
+        
+        return senderFuture.and(getterFuture).and(orderFuture).flatMap { result in
+            let (sender, getter, fullOrder) = (result.0.0, result.0.1, result.1)
+            let fullInteraction = Interaction.FullInteraction(
+                id: interaction.id,
+                sender: sender,
+                getter: getter,
+                order: fullOrder,
+                status: interaction.status
+            )
+            return req.eventLoop.makeSucceededFuture(fullInteraction)
         }
     }
 }
