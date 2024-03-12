@@ -35,16 +35,31 @@ struct TabController: RouteCollection {
     }
 
     // Получение всех активных заказов пользователя
-    func getAllActiveOrders(req: Request) throws -> EventLoopFuture<[Order]> {
+    func getAllActiveOrders(req: Request) throws -> EventLoopFuture<[OrderWithUserAndToolsAndSkill]> {
         let userID = try req.auth.require(User.self).requireID()
+        
         return Order.query(on: req.db)
             .filter(\.$owner.$id == userID)
             .filter(\.$isActive == true)
+            .with(\.$owner)
             .all()
+            .flatMap { orders in
+                let orderDetailsFutures = orders.map { order in
+                    let toolsFuture = order.$tools.query(on: req.db).all()
+                    
+                    let skillFuture = Skill.find(order.skill, on: req.db).unwrap(or: Abort(.notFound))
+                    
+                    return toolsFuture.and(skillFuture).map { tools, skill in
+                        let skillNames = SkillOrderNames(nameEn: skill.nameEn, nameRu: skill.nameRu)
+                        return OrderWithUserAndToolsAndSkill(order: order, user: order.owner, tools: tools.map { $0.name }, skill: skillNames)
+                    }
+                }
+                return orderDetailsFutures.flatten(on: req.eventLoop)
+            }
     }
-
+    
     // Получение всех коллабораций пользователя
-    func getAllCollaborations(req: Request) throws -> EventLoopFuture<[Order]> {
+    func getAllCollaborations(req: Request) throws -> EventLoopFuture<[OrderWithUserAndToolsAndSkill]> {
         let userID = try req.auth.require(User.self).requireID()
         return Tab.query(on: req.db)
             .filter(\.$user.$id == userID)
@@ -54,12 +69,26 @@ struct TabController: RouteCollection {
                 let orderIDs = tabs.map { $0.projectID }
                 return Order.query(on: req.db)
                     .filter(\.$id ~~ orderIDs)
+                    .with(\.$owner)
                     .all()
+                    .flatMap { orders in
+                        let orderDetailsFutures = orders.map { order in
+                            let toolsFuture = order.$tools.query(on: req.db).all()
+                            
+                            let skillFuture = Skill.find(order.skill, on: req.db).unwrap(or: Abort(.notFound))
+                            
+                            return toolsFuture.and(skillFuture).map { tools, skill in
+                                let skillNames = SkillOrderNames(nameEn: skill.nameEn, nameRu: skill.nameRu)
+                                return OrderWithUserAndToolsAndSkill(order: order, user: order.owner, tools: tools.map { $0.name }, skill: skillNames)
+                            }
+                        }
+                        return orderDetailsFutures.flatten(on: req.eventLoop)
+                    }
             }
     }
-
+    
     // Получение всех избранных заказов пользователя
-    func getAllFavoriteOrders(req: Request) throws -> EventLoopFuture<[Order]> {
+    func getAllFavoriteOrders(req: Request) throws -> EventLoopFuture<[OrderWithUserAndToolsAndSkill]> {
         let userID = try req.auth.require(User.self).requireID()
         return Tab.query(on: req.db)
             .filter(\.$user.$id == userID)
@@ -69,8 +98,21 @@ struct TabController: RouteCollection {
                 let orderIDs = tabs.map { $0.projectID }
                 return Order.query(on: req.db)
                     .filter(\.$id ~~ orderIDs)
+                    .with(\.$owner)
                     .all()
+                    .flatMap { orders in
+                        let orderDetailsFutures = orders.map { order in
+                            let toolsFuture = order.$tools.query(on: req.db).all()
+                            
+                            let skillFuture = Skill.find(order.skill, on: req.db).unwrap(or: Abort(.notFound))
+                            
+                            return toolsFuture.and(skillFuture).map { tools, skill in
+                                let skillNames = SkillOrderNames(nameEn: skill.nameEn, nameRu: skill.nameRu)
+                                return OrderWithUserAndToolsAndSkill(order: order, user: order.owner, tools: tools.map { $0.name }, skill: skillNames)
+                            }
+                        }
+                        return orderDetailsFutures.flatten(on: req.eventLoop)
+                    }
             }
     }
-
 }
