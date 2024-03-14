@@ -161,10 +161,8 @@ struct UserController: RouteCollection {
     func updateUser(req: Request) throws -> EventLoopFuture<HTTPStatus> {
         let updateUserRequest = try req.content.decode(UpdateUserRequest.self)
         
-        // Извлечение идентификатора пользователя из JWT
         let userID = try req.auth.require(User.self).requireID()
 
-        // Начало транзакции для обновления данных пользователя и его учетных данных
         return req.db.transaction { db in
             User.find(userID, on: db)
                 .unwrap(or: Abort(.notFound))
@@ -173,7 +171,7 @@ struct UserController: RouteCollection {
 
                     if let email = updateUserRequest.email, !email.isEmpty {
                         user.email = email
-                        updateLogin = true // Нужно обновить логин в AuthCredential
+                        updateLogin = true
                     }
                     if let name = updateUserRequest.name, !name.isEmpty { user.name = name }
                     if let surname = updateUserRequest.surname, !surname.isEmpty { user.surname = surname }
@@ -181,23 +179,20 @@ struct UserController: RouteCollection {
                     if let searchable = updateUserRequest.searchable { user.searchable = searchable }
                     if let experience = updateUserRequest.experience { user.experience = experience }
 
-                    // Сохранение обновленных данных пользователя
                     return user.save(on: db).flatMap {
-                        // Если нужно обновить логин
                         if updateLogin {
                             return AuthCredential.query(on: db)
                                 .filter(\.$user.$id == userID)
                                 .first()
                                 .unwrap(or: Abort(.notFound))
                                 .flatMap { authCredential in
-                                    authCredential.login = user.email // Обновление логина
+                                    authCredential.login = user.email
                                     return authCredential.save(on: db)
                                 }
                         } else {
                             return db.eventLoop.makeSucceededFuture(())
                         }
                     }.flatMap {
-                        // Обновление пароля пользователя, если он был предоставлен
                         if let password = updateUserRequest.passwordHash, let confirmPassword = updateUserRequest.confirmPasswordHash, !password.isEmpty, password == confirmPassword {
                             return AuthCredential.query(on: db)
                                 .filter(\.$user.$id == userID)

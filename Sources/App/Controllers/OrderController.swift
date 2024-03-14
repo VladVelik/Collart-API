@@ -101,7 +101,6 @@ struct OrderController: RouteCollection {
             //.unwrap(or: Abort(.badRequest, reason: "Skill not found"))
         
 
-        // Сначала загрузим изображение заказа на Cloudinary
         let imageUpload: EventLoopFuture<String?> = try createRequest.image.map {
                 try cloudinaryService.upload(file: $0, on: req).map(Optional.some)
             } ?? req.eventLoop.future(nil)
@@ -113,7 +112,6 @@ struct OrderController: RouteCollection {
         
         return imageUpload.and(skillLookup).flatMap { (imageURL, skill) in
             filesUploads.flatten(on: req.eventLoop).flatMap { filesURLs in
-                // Создание заказа (Order)
                 let order = Order(
                     ownerID: userID,
                     title: createRequest.title,
@@ -122,8 +120,8 @@ struct OrderController: RouteCollection {
                     taskDescription: createRequest.taskDescription,
                     projectDescription: createRequest.projectDescription,
                     experience: createRequest.experience,
-                    dataStart: createRequest.dataStart,
-                    dataEnd: createRequest.dataEnd,
+                    dataStart: createRequest.dataStart - 978307200,
+                    dataEnd: createRequest.dataEnd - 978307200,
                     files: filesURLs,
                     isActive: true
                 )
@@ -133,7 +131,6 @@ struct OrderController: RouteCollection {
                         return req.eventLoop.makeFailedFuture(Abort(.internalServerError))
                     }
                     
-                    // Найти UUID для инструментов
                     let toolsLookup = Tool.query(on: req.db)
                         .filter(\.$name ~~ createRequest.tools)
                         .all()
@@ -143,10 +140,8 @@ struct OrderController: RouteCollection {
                             }.flatten(on: req.eventLoop)
                         }
                     
-                    // Создать запись в OrderParticipant для создателя заказа
                     let participantRecord = OrderParticipant(orderID: orderID, userID: userID).save(on: req.db)
                     
-                    // Добавить запись в Tab для заказа
                     let tabRecord = Tab(userID: userID, projectID: orderID, tabType: .active).save(on: req.db)
                     
                     return toolsLookup.and(participantRecord).and(tabRecord).transform(to: .created)

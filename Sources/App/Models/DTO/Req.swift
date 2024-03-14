@@ -48,4 +48,6 @@ struct UpdateUserRequest: Content {
     var description: String?
     var searchable: Bool?
     var experience: ExperienceType?
+    var skills: [String]
+    var tools: [String]
 }

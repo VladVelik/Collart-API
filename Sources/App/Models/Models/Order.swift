@@ -28,11 +28,11 @@ final class Order: Model, Content {
     @Enum(key: "experience")
     var experience: ExperienceType
     
-    @Field(key: "data_start")
-    var dataStart: Date
+    @Timestamp(key: "data_start", on: .none)
+    var dataStart: Date?
 
-    @Field(key: "data_end")
-    var dataEnd: Date
+    @Timestamp(key: "data_end", on: .none)
+    var dataEnd: Date?
     
     @Field(key: "files")
     var files: [String]
