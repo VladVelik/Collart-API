@@ -354,20 +354,40 @@ extension InteractionController {
         let getterFuture = User.find(interaction.$getter.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
             self.loadFullUser(user, req: req)
         }
+
         let orderFuture = Order.find(interaction.$order.id, on: req.db).unwrap(or: Abort(.notFound)).flatMap { order in
-            self.loadFullOrder(order, req: req)
+            self.loadOrderWithUserAndToolsAndSkill(order, req: req)
         }
-        
+
         return senderFuture.and(getterFuture).and(orderFuture).flatMap { result in
-            let (sender, getter, fullOrder) = (result.0.0, result.0.1, result.1)
+            let (sender, getter, orderWithUserAndToolsAndSkill) = (result.0.0, result.0.1, result.1)
             let fullInteraction = Interaction.FullInteraction(
                 id: interaction.id,
                 sender: sender,
                 getter: getter,
-                order: fullOrder,
+                order: orderWithUserAndToolsAndSkill,
                 status: interaction.status
             )
             return req.eventLoop.makeSucceededFuture(fullInteraction)
+        }
+    }
+
+    private func loadOrderWithUserAndToolsAndSkill(_ order: Order, req: Request) -> EventLoopFuture<OrderWithUserAndToolsAndSkill> {
+        let toolsFuture = order.$tools.query(on: req.db).all()
+
+        let skillFuture = Skill.find(order.skill, on: req.db)//.unwrap(or: Abort(.notFound))
+
+        return toolsFuture.and(skillFuture).flatMap { (tools, skill) in
+            let userFuture = User.find(order.$owner.id, on: req.db).unwrap(or: Abort(.notFound))
+            return userFuture.map { user in
+                let skillNames = SkillOrderNames(nameEn: skill?.nameEn ?? "", nameRu: skill?.nameRu ?? "")
+                return OrderWithUserAndToolsAndSkill(
+                    order: order,
+                    user: user,
+                    tools: tools.map { $0.name },
+                    skill: skillNames
+                )
+            }
         }
     }
 }
@@ -391,7 +411,7 @@ extension Interaction {
         var id: UUID?
         var sender: UserWithSkillsAndTools
         var getter: UserWithSkillsAndTools
-        var order: Order.FullOrder
+        var order: OrderWithUserAndToolsAndSkill
         var status: Status
     }
 }
