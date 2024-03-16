@@ -75,8 +75,8 @@ struct SearchController: RouteCollection {
                 return usersWithSkillsAndToolsFutures.flatten(on: req.eventLoop)
             }
     }
-
-
+    
+    
     
     func getAllOrders(req: Request) throws -> EventLoopFuture<[OrderWithUserAndToolsAndSkill]> {
         let currentUserID = try req.auth.require(User.self).requireID()
@@ -90,11 +90,11 @@ struct SearchController: RouteCollection {
                 
                 let ordersWithDetailsFutures = filteredOrders.map { order in
                     let toolsFuture = order.$tools.query(on: req.db).all()
-                    let skillFuture = Skill.find(order.skill, on: req.db).unwrap(or: Abort(.notFound))
+                    let skillFuture = Skill.find(order.skill, on: req.db)//.unwrap(or: Abort(.notFound))
                     
                     return toolsFuture.and(skillFuture).map { (tools, skill) in
                         let toolNames = tools.map { $0.name }
-                        let skillNames = SkillOrderNames(nameEn: skill.nameEn, nameRu: skill.nameRu)
+                        let skillNames = SkillOrderNames(nameEn: skill?.nameEn ?? "", nameRu: skill?.nameRu ?? "")
                         return OrderWithUserAndToolsAndSkill(
                             order: order,
                             user: order.owner,
@@ -106,14 +106,14 @@ struct SearchController: RouteCollection {
                 return ordersWithDetailsFutures.flatten(on: req.eventLoop)
             }
     }
-
+    
     
     func getFilteredOrders(req: Request) throws -> EventLoopFuture<[OrderWithUserAndToolsAndSkill]> {
         let currentUserID = try req.auth.require(User.self).requireID()
-        let skillNames = req.query[[String].self, at: "skills"] ?? []
-        let toolNames = req.query[[String].self, at: "tools"] ?? []
-        let experienceFilter: ExperienceType? = req.query[ExperienceType.self, at: "experience"]
-
+        let skillNames = req.content[[String].self, at: "skills"] ?? []
+        let toolNames = req.content[[String].self, at: "tools"] ?? []
+        let experienceFilter: [ExperienceType] = req.content[[ExperienceType].self, at: "experience"] ?? []
+        
         var skillIDsFuture: EventLoopFuture<[UUID]> = req.eventLoop.future([])
         if !skillNames.isEmpty {
             skillIDsFuture = Skill.query(on: req.db)
@@ -134,23 +134,27 @@ struct SearchController: RouteCollection {
                 .all()
                 .map { $0.map { $0.id! } }
         }
-
+        
         return skillIDsFuture.and(toolIDsFuture).flatMap { (skillIDs, toolIDs) in
             var query = Order.query(on: req.db).filter(\.$isActive == true)
-
-            if let experience = experienceFilter {
-                query = query.filter(\.$experience == experience)
+            
+            if !experienceFilter.isEmpty {
+                query = query.group(.or) { or in
+                    for experience in experienceFilter {
+                        or.filter(\.$experience == experience)
+                    }
+                }
             }
-
+            
             if !skillIDs.isEmpty {
                 query = query.filter(\.$skill ~~ skillIDs)
             }
-
+            
             if !toolIDs.isEmpty {
                 query = query.join(OrderTool.self, on: \Order.$id == \OrderTool.$order.$id)
-                             .filter(OrderTool.self, \OrderTool.$tool.$id ~~ toolIDs)
+                    .filter(OrderTool.self, \OrderTool.$tool.$id ~~ toolIDs)
             }
-
+            
             return query
                 .with(\.$owner)
                 .all()
@@ -160,7 +164,7 @@ struct SearchController: RouteCollection {
                     let ordersWithDetailsFutures = filteredOrders.map { order in
                         let toolsFuture = order.$tools.query(on: req.db).all()
                         let skillFuture = Skill.find(order.skill, on: req.db)
-
+                        
                         return toolsFuture.and(skillFuture).map { tools, skill in
                             let skillInfo = skill.map { SkillOrderNames(nameEn: $0.nameEn, nameRu: $0.nameRu) }
                             return OrderWithUserAndToolsAndSkill(order: order, user: order.owner, tools: tools.map { $0.name }, skill: skillInfo)
@@ -170,65 +174,54 @@ struct SearchController: RouteCollection {
                 }
         }
     }
-
-
+    
     func getFilteredUsers(req: Request) throws -> EventLoopFuture<[UserWithSkillsAndTools]> {
-        //let skillNames = req.query[[String].self, at: "skills"] ?? []
-        //let toolNames = req.query[[String].self, at: "tools"] ?? []
-        let currentUser = try req.auth.require(User.self)
-        let experienceFilter: ExperienceType? = req.query[ExperienceType.self, at: "experience"]
-
-        var query = User.query(on: req.db)
-            .filter(\.$searchable == true)
-            .filter(\.$id != currentUser.id!)
-
-        if let experience = experienceFilter {
-            query = query.filter(\.$experience == experience)
-        }
+        let currentUserID = try req.auth.require(User.self).requireID()
+        let skillNames = req.content[[String].self, at: "skills"] ?? []
+        let toolNames = req.content[[String].self, at: "tools"] ?? []
+        let experienceFilter: [ExperienceType] = req.content[[ExperienceType].self, at: "experience"] ?? []
         
-        return query.all().flatMap { users in
-            let userFutures = users.map { user -> EventLoopFuture<UserWithSkillsAndTools> in
-                let skillsFuture = UserSkill.query(on: req.db)
-                    .filter(\.$user.$id == user.id!)
-                    .all()
-                    .flatMap { userSkills in
-                        let skillIDs = userSkills.map { $0.$skill.id }
-                        return Skill.query(on: req.db)
-                            .filter(\.$id ~~ skillIDs)
-                            .all()
-                            .map { skills in
-                                skills.compactMap { skill -> SkillNames? in
-                                    guard let userSkill = userSkills.first(where: { $0.$skill.id == skill.id }) else {
-                                        return nil
-                                    }
-                                    return SkillNames(
-                                        nameEn: skill.nameEn,
-                                        primary: userSkill.primary,
-                                        nameRu: skill.nameRu
-                                    )
-                                }
-                            }
+        let skillIDsFuture = Skill.query(on: req.db)
+            .group(.or) { or in
+                or.filter(\.$nameEn ~~ skillNames)
+                or.filter(\.$nameRu ~~ skillNames)
+            }
+            .all()
+            .map { $0.map { $0.id! } }
+        
+        let toolIDsFuture = Tool.query(on: req.db)
+            .filter(\.$name ~~ toolNames)
+            .all()
+            .map { $0.map { $0.id! } }
+        
+        return skillIDsFuture.and(toolIDsFuture).flatMap { skillIDs, toolIDs in
+            var query = User.query(on: req.db)
+                .filter(\.$searchable == true)
+                .filter(\.$id != currentUserID)
+            
+            if !skillIDs.isEmpty {
+                query = query.join(UserSkill.self, on: \UserSkill.$user.$id == \User.$id)
+                    .filter(UserSkill.self, \UserSkill.$skill.$id ~~ skillIDs)
+            }
+            
+            if !toolIDs.isEmpty {
+                query = query.join(UserTool.self, on: \UserTool.$user.$id == \User.$id)
+                    .filter(UserTool.self, \UserTool.$tool.$id ~~ toolIDs)
+            }
+            
+            if !experienceFilter.isEmpty {
+                query = query.filter(\User.$experience ~~ experienceFilter)
+            }
+            
+            return query.with(\.$skills).with(\.$tools).all().map { users in
+                users.map { user in
+                    let skills = user.skills.compactMap { skill in
+                        SkillNames(nameEn: skill.nameEn, primary: true, nameRu: skill.nameRu)
                     }
-                
-                let toolsFuture = UserTool.query(on: req.db)
-                    .filter(\.$user.$id == user.id!)
-                    .all()
-                    .flatMap { userTools in
-                        let toolIDs = userTools.map { $0.$tool.id }
-                        return Tool.query(on: req.db)
-                            .filter(\.$id ~~ toolIDs)
-                            .all()
-                            .map { tools in
-                                tools.map { $0.name }
-                            }
-                    }
-                
-                return skillsFuture.and(toolsFuture).map { (skillNames, toolNames) in
-                    UserWithSkillsAndTools(user: user.asPublic(), skills: skillNames, tools: toolNames)
+                    let tools = user.tools.map { $0.name }
+                    return UserWithSkillsAndTools(user: user.asPublic(), skills: skills, tools: tools)
                 }
             }
-            return userFutures.flatten(on: req.eventLoop)
         }
     }
-
 }
