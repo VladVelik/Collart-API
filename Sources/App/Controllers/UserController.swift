@@ -159,9 +159,8 @@ struct UserController: RouteCollection {
     }
     
     func updateUser(req: Request) throws -> EventLoopFuture<HTTPStatus> {
-        let updateUserRequest = try req.content.decode(UpdateUserRequest.self)
-        
         let userID = try req.auth.require(User.self).requireID()
+        let updateUserRequest = try req.content.decode(UpdateUserRequest.self)
 
         return req.db.transaction { db in
             User.find(userID, on: db)
