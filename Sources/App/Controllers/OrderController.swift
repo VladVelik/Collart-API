@@ -11,12 +11,6 @@ import Crypto
 import JWT
 
 struct OrderController: RouteCollection {
-    let cloudinaryService = CloudinaryService(
-        cloudName: "dwkprbrad",
-        apiKey: "571257446453121",
-        apiSecret: "tgoQJ4AKmlCihUe3t_oImnXTGDM"
-    )
-    
     func boot(routes: Vapor.RoutesBuilder) throws {
         routes.group("orders") { authGroup in
             let tokenProtected = authGroup.grouped(JWTMiddleware())
@@ -70,12 +64,12 @@ struct OrderController: RouteCollection {
             .unwrap(or: Abort(.notFound))
             .flatMap { order in
                 let toolsFuture = order.$tools.query(on: req.db).all()
-                let skillFuture = Skill.find(order.skill, on: req.db).unwrap(or: Abort(.notFound))
+                let skillFuture = Skill.find(order.skill, on: req.db)//.unwrap(or: Abort(.notFound))
                 
                 return toolsFuture.and(skillFuture).flatMap { (tools, skill) in
                     let userFuture = User.find(order.$owner.id, on: req.db).unwrap(or: Abort(.notFound))
                     return userFuture.map { user in
-                        let skillNames = SkillOrderNames(nameEn: skill.nameEn, nameRu: skill.nameRu)
+                        let skillNames = SkillOrderNames(nameEn: skill?.nameEn ?? "", nameRu: skill?.nameRu ?? "")
                         return OrderWithUserAndToolsAndSkill(
                             order: order,
                             user: order.owner,
@@ -102,11 +96,11 @@ struct OrderController: RouteCollection {
         
 
         let imageUpload: EventLoopFuture<String?> = try createRequest.image.map {
-                try cloudinaryService.upload(file: $0, on: req).map(Optional.some)
-            } ?? req.eventLoop.future(nil)
+            try CloudinaryService.shared.upload(file: $0, on: req).map(Optional.some)
+        } ?? req.eventLoop.future(nil)
         
         let filesUploads: [EventLoopFuture<String>] = try createRequest.files?.map {
-            try cloudinaryService.upload(file: $0, on: req)
+            try CloudinaryService.shared.upload(file: $0, on: req)
         } ?? []
         
         
@@ -158,9 +152,9 @@ struct OrderController: RouteCollection {
             var deleteFutures: [EventLoopFuture<Void>] = []
             
             if let newImage = updateData.image {
-                let deleteOldImageFuture = try cloudinaryService.delete(publicId: extractResourceName(from: order.image) ?? "", on: req)
+                let deleteOldImageFuture = try CloudinaryService.shared.delete(publicId: extractResourceName(from: order.image) ?? "", on: req)
                 deleteFutures.append(deleteOldImageFuture)
-                let uploadNewImageFuture = try cloudinaryService.upload(file: newImage, on: req).map { newImageUrl in
+                let uploadNewImageFuture = try CloudinaryService.shared.upload(file: newImage, on: req).map { newImageUrl in
                     order.image = newImageUrl
                 }
                 deleteFutures.append(uploadNewImageFuture)
@@ -168,10 +162,10 @@ struct OrderController: RouteCollection {
             
             // Если предоставлены новые файлы, удалить старые из Cloudinary и загрузить новые
             if let newFiles = updateData.files, !newFiles.isEmpty {
-                let deleteOldFilesFutures = try order.files.map { try cloudinaryService.delete(publicId: extractResourceName(from: $0) ?? "", on: req) }
+                let deleteOldFilesFutures = try order.files.map { try CloudinaryService.shared.delete(publicId: extractResourceName(from: $0) ?? "", on: req) }
                 deleteFutures.append(contentsOf: deleteOldFilesFutures)
                 
-                let uploadNewFilesFutures = try newFiles.map { try cloudinaryService.upload(file: $0, on: req) }.flatten(on: req.eventLoop).map { newFileUrls in
+                let uploadNewFilesFutures = try newFiles.map { try CloudinaryService.shared.upload(file: $0, on: req) }.flatten(on: req.eventLoop).map { newFileUrls in
                     order.files = newFileUrls
                 }
                 deleteFutures.append(uploadNewFilesFutures)
@@ -212,11 +206,11 @@ struct OrderController: RouteCollection {
         // Найти заказ для удаления
         return Order.find(projectID, on: req.db).unwrap(or: Abort(.notFound)).flatMapThrowing { order in
             // Удаление изображения заказа с Cloudinary
-            let deleteImageFuture = try cloudinaryService.delete(publicId: extractResourceName(from: order.image) ?? "", on: req)
+            let deleteImageFuture = try CloudinaryService.shared.delete(publicId: extractResourceName(from: order.image) ?? "", on: req)
             
             // Удаление файлов заказа с Cloudinary
             let deleteFilesFutures = try order.files.map { fileUrl in
-                try cloudinaryService.delete(publicId: extractResourceName(from: fileUrl) ?? "", on: req)
+                try CloudinaryService.shared.delete(publicId: extractResourceName(from: fileUrl) ?? "", on: req)
             }.flatten(on: req.eventLoop)
             
             let deleteOrderToolFuture = OrderTool.query(on: req.db).filter(\.$order.$id == projectID).delete()

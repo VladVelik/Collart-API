@@ -2,12 +2,6 @@ import Vapor
 import Fluent
 
 struct UserController: RouteCollection {
-    let cloudinaryService = CloudinaryService(
-        cloudName: "dwkprbrad",
-        apiKey: "571257446453121",
-        apiSecret: "tgoQJ4AKmlCihUe3t_oImnXTGDM"
-    )
-    
     func boot(routes: RoutesBuilder) throws {
         let usersRoute = routes.grouped("users")
         usersRoute.get(":userID", use: get)
@@ -104,7 +98,7 @@ struct UserController: RouteCollection {
         
         let input = try req.content.decode(FileUpload.self)
         
-        return try cloudinaryService.upload(file: input.file, on: req).flatMap { imageUrl in
+        return try CloudinaryService.shared.upload(file: input.file, on: req).flatMap { imageUrl in
             return User.find(userID, on: req.db).unwrap(or: Abort(.notFound)).flatMap { user in
                 switch imageType {
                 case .photo:
@@ -122,7 +116,7 @@ struct UserController: RouteCollection {
             throw Abort(.badRequest, reason: "Missing publicId")
         }
         let userID = try req.auth.require(User.self).requireID()
-        return try cloudinaryService.delete(publicId: publicId, on: req).flatMap { status in
+        return try CloudinaryService.shared.delete(publicId: publicId, on: req).flatMap { status in
             // После успешного удаления изображения, ищем пользователя и обновляем его запись
             User.find(userID, on: req.db).flatMap { user in
                 guard let user = user else {

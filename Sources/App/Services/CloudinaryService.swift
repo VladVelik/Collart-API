@@ -4,6 +4,12 @@ import Vapor
 import Foundation
 
 struct CloudinaryService {
+    static let shared = CloudinaryService(
+        cloudName: "dwkprbrad",
+        apiKey: "571257446453121",
+        apiSecret: "tgoQJ4AKmlCihUe3t_oImnXTGDM"
+    )
+    
     let cloudName: String
     let apiKey: String
     let apiSecret: String
@@ -42,7 +48,7 @@ struct CloudinaryService {
                 throw Abort(.internalServerError, reason: "Invalid response from Cloudinary")
             }
             let data = Data(buffer: body)
-                            // Попытка преобразования Data в String для логирования
+            
             if let bodyString = String(data: data, encoding: .utf8) {
                 print("Cloudinary response: \(bodyString)")
             }

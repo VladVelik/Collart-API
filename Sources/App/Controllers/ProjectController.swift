@@ -11,12 +11,6 @@ import Crypto
 import JWT
 
 struct ProjectController: RouteCollection {
-    let cloudinaryService = CloudinaryService(
-        cloudName: "dwkprbrad",
-        apiKey: "571257446453121",
-        apiSecret: "tgoQJ4AKmlCihUe3t_oImnXTGDM"
-    )
-    
     func boot(routes: Vapor.RoutesBuilder) throws {
         routes.group("projects") { authGroup in
             let tokenProtected = authGroup.grouped(JWTMiddleware())
@@ -52,7 +46,7 @@ struct ProjectController: RouteCollection {
             if let _ = updateData.image {
                 let oldImageUrl = portfolioProject.image
                 let publicId = extractResourceName(from: oldImageUrl)
-                let deleteFuture = try cloudinaryService.delete(publicId: publicId ?? "", on: req)
+                let deleteFuture = try CloudinaryService.shared.delete(publicId: publicId ?? "", on: req)
                 deleteFutures.append(deleteFuture)
             }
             
@@ -60,7 +54,7 @@ struct ProjectController: RouteCollection {
             if let newFiles = updateData.files, !newFiles.isEmpty {
                 let deleteFileFutures = try portfolioProject.files.map { oldFileUrl in
                     let publicId = extractResourceName(from: oldFileUrl)
-                    return try cloudinaryService.delete(publicId: publicId ?? "", on: req)
+                    return try CloudinaryService.shared.delete(publicId: publicId ?? "", on: req)
                 }
                 deleteFutures.append(contentsOf: deleteFileFutures)
             }
@@ -69,14 +63,14 @@ struct ProjectController: RouteCollection {
             return EventLoopFuture.andAllSucceed(deleteFutures, on: req.eventLoop).flatMapThrowing {
                 // Загрузка новых изображений и файлов
                 let uploadImageFuture = updateData.image != nil ?
-                    try cloudinaryService.upload(file: updateData.image!, on: req).map { imageUrl -> String in
+                    try CloudinaryService.shared.upload(file: updateData.image!, on: req).map { imageUrl -> String in
                         portfolioProject.image = imageUrl
                         return imageUrl
                     } : req.eventLoop.makeSucceededFuture(portfolioProject.image)
                 
                 let uploadFilesFuture = updateData.files != nil ?
                     try updateData.files!.map { file in
-                        try cloudinaryService.upload(file: file, on: req)
+                        try CloudinaryService.shared.upload(file: file, on: req)
                     }.flatten(on: req.eventLoop).map { fileUrls -> [String] in
                         portfolioProject.files = fileUrls
                         return fileUrls
@@ -103,11 +97,11 @@ struct ProjectController: RouteCollection {
         let createRequest = try req.content.decode(PortfolioProjectCreateRequest.self)
         
         // Сначала загрузите изображение проекта
-        return try cloudinaryService.upload(file: createRequest.image, on: req).flatMap { imageUrl in
+        return try CloudinaryService.shared.upload(file: createRequest.image, on: req).flatMap { imageUrl in
             // Затем загрузите все файлы проекта
             let fileUploads = createRequest.files.map { fileData in
                 do {
-                    return try cloudinaryService.upload(file: fileData, on: req)
+                    return try CloudinaryService.shared.upload(file: fileData, on: req)
                 } catch {
                     return req.eventLoop.makeFailedFuture(error)
                 }
@@ -145,13 +139,13 @@ struct ProjectController: RouteCollection {
             
             // Удаление основного изображения проекта, если оно есть
             if let publicId = extractResourceName(from: portfolioProject.image) {
-                deleteFutures.append(try cloudinaryService.delete(publicId: publicId, on: req))
+                deleteFutures.append(try CloudinaryService.shared.delete(publicId: publicId, on: req))
             }
             
             // Удаление всех файлов проекта
             let fileDeleteFutures = try portfolioProject.files.map { fileUrl in
                 if let publicId = extractResourceName(from: fileUrl) {
-                    return try cloudinaryService.delete(publicId: publicId, on: req)
+                    return try CloudinaryService.shared.delete(publicId: publicId, on: req)
                 } else {
                     return req.eventLoop.makeSucceededFuture(())
                 }
