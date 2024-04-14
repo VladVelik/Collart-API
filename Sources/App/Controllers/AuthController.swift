@@ -134,7 +134,7 @@ struct AuthController: RouteCollection {
                         )
                     }
 
-                    let toolNames = tools.map { $0.name } // Предполагается, что у Tool есть свойство name
+                    let toolNames = tools.map { $0.name }
 
                     let userPublic = user.asPublic()
                     return UserWithSkillsAndTools(user: userPublic, skills: skillNames, tools: toolNames)

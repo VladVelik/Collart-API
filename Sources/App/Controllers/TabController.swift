@@ -13,15 +13,17 @@ struct TabController: RouteCollection {
         let tabRoute = routes.grouped("tab")
         
         let tokenProtected = tabRoute.grouped(JWTMiddleware())
-        tokenProtected.get("portfolio", use: getAllPortfolioProjects)
-        tokenProtected.get("active", use: getAllActiveOrders)
-        tokenProtected.get("collaborations", use: getAllCollaborations)
-        tokenProtected.get("favorites", use: getAllFavoriteOrders)
+        tokenProtected.get("portfolio", ":userID", use: getAllPortfolioProjects)
+        tokenProtected.get("active", ":userID", use: getAllActiveOrders)
+        tokenProtected.get("collaborations", ":userID", use: getAllCollaborations)
+        tokenProtected.get("favorites", ":userID", use: getAllFavoriteOrders)
     }
     
     // Получение всех проектов портфолио пользователя
     func getAllPortfolioProjects(req: Request) throws -> EventLoopFuture<[PortfolioProject]> {
-        let userID = try req.auth.require(User.self).requireID()
+        guard let userID = req.parameters.get("userID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "User ID is required")
+        }
         return Tab.query(on: req.db)
             .filter(\.$user.$id == userID)
             .filter(\.$tabType == .portfolio)
@@ -36,8 +38,9 @@ struct TabController: RouteCollection {
 
     // Получение всех активных заказов пользователя
     func getAllActiveOrders(req: Request) throws -> EventLoopFuture<[OrderWithUserAndToolsAndSkill]> {
-        let userID = try req.auth.require(User.self).requireID()
-        
+        guard let userID = req.parameters.get("userID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "User ID is required")
+        }
         return Order.query(on: req.db)
             .filter(\.$owner.$id == userID)
             .filter(\.$isActive == true)
@@ -47,7 +50,7 @@ struct TabController: RouteCollection {
                 let orderDetailsFutures = orders.map { order in
                     let toolsFuture = order.$tools.query(on: req.db).all()
                     
-                    let skillFuture = Skill.find(order.skill, on: req.db).unwrap(or: Abort(.notFound))
+                    let skillFuture = Skill.find(order.skill, on: req.db).unwrap(or: Abort(.badRequest))
                     
                     return toolsFuture.and(skillFuture).map { tools, skill in
                         let skillNames = SkillOrderNames(nameEn: skill.nameEn, nameRu: skill.nameRu)
@@ -60,7 +63,9 @@ struct TabController: RouteCollection {
     
     // Получение всех коллабораций пользователя
     func getAllCollaborations(req: Request) throws -> EventLoopFuture<[OrderWithUserAndToolsAndSkill]> {
-        let userID = try req.auth.require(User.self).requireID()
+        guard let userID = req.parameters.get("userID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "User ID is required")
+        }
         return Tab.query(on: req.db)
             .filter(\.$user.$id == userID)
             .filter(\.$tabType == .collaborations)
@@ -75,7 +80,7 @@ struct TabController: RouteCollection {
                         let orderDetailsFutures = orders.map { order in
                             let toolsFuture = order.$tools.query(on: req.db).all()
                             
-                            let skillFuture = Skill.find(order.skill, on: req.db).unwrap(or: Abort(.notFound))
+                            let skillFuture = Skill.find(order.skill, on: req.db).unwrap(or: Abort(.badRequest))
                             
                             return toolsFuture.and(skillFuture).map { tools, skill in
                                 let skillNames = SkillOrderNames(nameEn: skill.nameEn, nameRu: skill.nameRu)
@@ -89,7 +94,9 @@ struct TabController: RouteCollection {
     
     // Получение всех избранных заказов пользователя
     func getAllFavoriteOrders(req: Request) throws -> EventLoopFuture<[OrderWithUserAndToolsAndSkill]> {
-        let userID = try req.auth.require(User.self).requireID()
+        guard let userID = req.parameters.get("userID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "User ID is required")
+        }
         return Tab.query(on: req.db)
             .filter(\.$user.$id == userID)
             .filter(\.$tabType == .favorite)
@@ -104,7 +111,7 @@ struct TabController: RouteCollection {
                         let orderDetailsFutures = orders.map { order in
                             let toolsFuture = order.$tools.query(on: req.db).all()
                             
-                            let skillFuture = Skill.find(order.skill, on: req.db).unwrap(or: Abort(.notFound))
+                            let skillFuture = Skill.find(order.skill, on: req.db).unwrap(or: Abort(.badRequest))
                             
                             return toolsFuture.and(skillFuture).map { tools, skill in
                                 let skillNames = SkillOrderNames(nameEn: skill.nameEn, nameRu: skill.nameRu)
