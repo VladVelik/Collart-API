@@ -30,12 +30,14 @@ final class Message: Model, Content {
 
     init() {}
 
-    init(id: UUID? = nil, senderID: UUID, receiverID: UUID, message: String, files: [String], isRead: Bool) {
+    init(id: UUID? = nil, senderID: UUID, receiverID: UUID, message: String, files: [String], createdAt: Date?, updatedAt: Date?, isRead: Bool) {
         self.id = id
         self.$sender.id = senderID
         self.$receiver.id = receiverID
         self.message = message
         self.files = files
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
         self.isRead = isRead
     }
 }

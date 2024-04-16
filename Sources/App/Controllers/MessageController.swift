@@ -12,9 +12,10 @@ struct MessageController: RouteCollection {
     func boot(routes: RoutesBuilder) throws {
         let messagesRoute = routes.grouped("messages")
         
-        let tokenProtected = messagesRoute.grouped(JWTMiddleware())
-        tokenProtected.post(use: createMessage)
-        tokenProtected.get(use: getAllMessages)
+        let tokenProtected = messagesRoute
+        messagesRoute.post("send", use: createMessage)
+        tokenProtected.get("between", use: getMessagesBetweenUsers)
+        tokenProtected.get("allMessages", use: getAllMessages)
         tokenProtected.get(":messageID", use: getMessage)
         tokenProtected.put(":messageID", use: updateMessage)
         tokenProtected.delete(":messageID", use: deleteMessage)
@@ -33,11 +34,35 @@ struct MessageController: RouteCollection {
                 receiverID: messageData.receiverID,
                 message: messageData.message,
                 files: fileURLs,
+                createdAt: Date(),
+                updatedAt: nil,
                 isRead: false
             )
 
             return message.save(on: req.db).map { message }
         }
+    }
+    
+    func getMessagesBetweenUsers(req: Request) throws -> EventLoopFuture<[Message]> {
+        let params = try req.content.decode(FetchMessagesRequest.self)
+        
+        return Message.query(on: req.db)
+            .group(.or) { or in
+                or.group(.and) { and in
+                    and.filter(\.$sender.$id == params.senderID)
+                    and.filter(\.$receiver.$id == params.receiverID)
+                }
+                or.group(.and) { and in
+                    and.filter(\.$sender.$id == params.receiverID)
+                    and.filter(\.$receiver.$id == params.senderID)
+                }
+            }
+            .sort(\Message.$createdAt, .descending)
+            .range(params.offset..<(params.offset + params.limit))
+            .all()
+            .map { messages in
+                return messages.reversed()
+            }
     }
 
     func getAllMessages(req: Request) throws -> EventLoopFuture<[Message]> {
@@ -76,6 +101,15 @@ extension Message {
         var receiverID: UUID
         var message: String
         var files: [File]?
+        var createdAt: Date?
+        var updatedAt: Date?
         var isRead: Bool
     }
+}
+
+struct FetchMessagesRequest: Content {
+    var senderID: UUID
+    var receiverID: UUID
+    var offset: Int
+    var limit: Int
 }
