@@ -19,6 +19,8 @@ struct MessageController: RouteCollection {
         tokenProtected.get(":messageID", use: getMessage)
         tokenProtected.put(":messageID", use: updateMessage)
         tokenProtected.delete(":messageID", use: deleteMessage)
+        tokenProtected.get("chats", ":userID", use: getAllChatsHandler)
+        tokenProtected.post("markRead", use: markMessagesAsRead)
     }
     
     func createMessage(req: Request) throws -> EventLoopFuture<Message> {
@@ -27,7 +29,7 @@ struct MessageController: RouteCollection {
         let uploads: [EventLoopFuture<String>] = try messageData.files?.map { file in
             try CloudinaryService.shared.upload(file: file, on: req)
         } ?? []
-
+        
         return uploads.flatten(on: req.eventLoop).flatMap { fileURLs in
             let message = Message(
                 senderID: messageData.senderID,
@@ -38,7 +40,7 @@ struct MessageController: RouteCollection {
                 updatedAt: nil,
                 isRead: false
             )
-
+            
             return message.save(on: req.db).map { message }
         }
     }
@@ -58,13 +60,93 @@ struct MessageController: RouteCollection {
                 }
             }
             .sort(\Message.$createdAt, .descending)
-            .range(params.offset..<(params.offset + params.limit))
+            .range((params.offset ?? 0)..<((params.offset ?? 0) + (params.limit ?? 100)))
             .all()
             .map { messages in
                 return messages.reversed()
             }
     }
+    
+    func getAllChatsHandler(req: Request) throws -> EventLoopFuture<[ChatPreview]> {
+        guard let userIDString = req.parameters.get("userID"), let userID = UUID(uuidString: userIDString) else {
+            throw Abort(.badRequest, reason: "Invalid user ID")
+        }
+        return try getAllChats(for: userID, req: req)
+    }
+    
+    func getAllChats(for userID: UUID, req: Request) throws -> EventLoopFuture<[ChatPreview]> {
+        User.query(on: req.db)
+            .all()
+            .flatMapThrowing { users in
+                try users.map { user -> EventLoopFuture<ChatPreview?> in
+                    let lastMessageFuture = Message.query(on: req.db)
+                        .group(.or) { or in
+                            or.group(.and) { and in
+                                and.filter(\.$sender.$id == userID)
+                                and.filter(\.$receiver.$id == user.id!)
+                            }
+                            or.group(.and) { and in
+                                and.filter(\.$sender.$id == user.id!)
+                                and.filter(\.$receiver.$id == userID)
+                            }
+                        }
+                        .sort(\.$createdAt, .descending)
+                        .first()
+                    
+                    let unreadCountFuture = Message.query(on: req.db)
+                        .filter(\.$receiver.$id == userID)
+                        .filter(\.$sender.$id == user.id!)
+                        .filter(\.$isRead == false)
+                        .count()
+                    
+                    return lastMessageFuture.and(unreadCountFuture).map { (lastMessage, unreadCount) in
+                        guard let lastMessage = lastMessage, !lastMessage.message.isEmpty else { return nil }
+                        return ChatPreview(
+                            userID: user.id!,
+                            userName: user.name + " " + user.surname,
+                            userPhotoURL: user.userPhoto,
+                            lastMessage: lastMessage.message,
+                            unreadMessagesCount: unreadCount,
+                            messageTime: lastMessage.createdAt ?? Date()
+                        )
+                    }
+                }
+            }
+            .flatMap { $0.flatten(on: req.eventLoop) }
+            .map { $0.compactMap { $0 } }
+    }
+    
+    func markMessagesAsRead(req: Request) throws -> EventLoopFuture<HTTPStatus> {
+        let params = try req.content.decode(FetchMessagesRequest.self)
+        
+        var query = Message.query(on: req.db)
+            .group(.or) { or in
+                or.group(.and) { and in
+                    and.filter(\.$sender.$id == params.senderID)
+                    and.filter(\.$receiver.$id == params.receiverID)
+                }
+                or.group(.and) { and in
+                    and.filter(\.$sender.$id == params.receiverID)
+                    and.filter(\.$receiver.$id == params.senderID)
+                }
+            }
+            .filter(\.$isRead == false)
 
+        if let offset = params.offset {
+            query = query.range((params.offset ?? 0)..<((params.offset ?? 0) + (params.limit ?? 100)))
+        }
+
+        return query.all()
+            .flatMap { messages in
+                messages.map { message in
+                    message.isRead = true
+                    return message.update(on: req.db)
+                }.flatten(on: req.eventLoop)
+            }
+            .transform(to: .ok)
+    }
+
+    
     func getAllMessages(req: Request) throws -> EventLoopFuture<[Message]> {
         return Message.query(on: req.db).all()
     }
@@ -110,6 +192,15 @@ extension Message {
 struct FetchMessagesRequest: Content {
     var senderID: UUID
     var receiverID: UUID
-    var offset: Int
-    var limit: Int
+    var offset: Int?
+    var limit: Int?
+}
+
+struct ChatPreview: Content {
+    var userID: UUID
+    var userName: String
+    var userPhotoURL: String
+    var lastMessage: String
+    var unreadMessagesCount: Int
+    var messageTime: Date
 }
