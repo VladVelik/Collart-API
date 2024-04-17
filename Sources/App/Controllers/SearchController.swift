@@ -14,8 +14,8 @@ struct SearchController: RouteCollection {
             let tokenProtected = search.grouped(JWTMiddleware())
             tokenProtected.get("users", "all", use: getAllUsers)
             tokenProtected.get("orders", "all", use: getAllOrders)
-            tokenProtected.get("filteredOrders", use: getFilteredOrders)
-            tokenProtected.get("filteredUsers", use: getFilteredUsers)
+            tokenProtected.post("filteredOrders", use: getFilteredOrders)
+            tokenProtected.post("filteredUsers", use: getFilteredUsers)
         }
     }
     

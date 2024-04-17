@@ -14,7 +14,7 @@ struct MessageController: RouteCollection {
         
         let tokenProtected = messagesRoute
         messagesRoute.post("send", use: createMessage)
-        tokenProtected.get("between", use: getMessagesBetweenUsers)
+        tokenProtected.post("between", use: getMessagesBetweenUsers)
         tokenProtected.get("allMessages", use: getAllMessages)
         tokenProtected.get(":messageID", use: getMessage)
         tokenProtected.put(":messageID", use: updateMessage)

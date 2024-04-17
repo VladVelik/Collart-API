@@ -26,6 +26,7 @@ func routes(_ app: Application) throws {
     try app.register(collection: TabController())
     try app.register(collection: SearchController())
     try app.register(collection: MessageController())
+    
 }
 
 func protectedHandler(req: Request) throws -> String {
