@@ -107,7 +107,8 @@ struct MessageController: RouteCollection {
                             userPhotoURL: user.userPhoto,
                             lastMessage: lastMessage.message,
                             unreadMessagesCount: unreadCount,
-                            messageTime: lastMessage.createdAt ?? Date()
+                            messageTime: lastMessage.createdAt ?? Date(),
+                            isRead: lastMessage.isRead
                         )
                     }
                 }
@@ -203,4 +204,5 @@ struct ChatPreview: Content {
     var lastMessage: String
     var unreadMessagesCount: Int
     var messageTime: Date
+    var isRead: Bool
 }
