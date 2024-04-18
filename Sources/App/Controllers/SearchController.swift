@@ -113,6 +113,8 @@ struct SearchController: RouteCollection {
         let skillNames = req.content[[String].self, at: "skills"] ?? []
         let toolNames = req.content[[String].self, at: "tools"] ?? []
         let experienceFilter: [ExperienceType] = req.content[[ExperienceType].self, at: "experience"] ?? []
+        let offset = req.content[Int.self, at: "offset"] ?? 0
+        let limit = req.content[Int.self, at: "limit"] ?? 100
         
         var skillIDsFuture: EventLoopFuture<[UUID]> = req.eventLoop.future([])
         if !skillNames.isEmpty {
@@ -157,6 +159,7 @@ struct SearchController: RouteCollection {
             
             return query
                 .with(\.$owner)
+                .range(offset..<(offset + limit))
                 .all()
                 .flatMap { orders in
                     let filteredOrders = orders.filter { $0.$owner.id != currentUserID }
@@ -180,6 +183,8 @@ struct SearchController: RouteCollection {
         let skillNames = req.content[[String].self, at: "skills"] ?? []
         let toolNames = req.content[[String].self, at: "tools"] ?? []
         let experienceFilter: [ExperienceType] = req.content[[ExperienceType].self, at: "experience"] ?? []
+        let offset = req.content[Int.self, at: "offset"] ?? 0
+        let limit = req.content[Int.self, at: "limit"] ?? 100
         
         let skillIDsFuture = Skill.query(on: req.db)
             .group(.or) { or in
@@ -213,7 +218,12 @@ struct SearchController: RouteCollection {
                 query = query.filter(\User.$experience ~~ experienceFilter)
             }
             
-            return query.with(\.$skills).with(\.$tools).all().map { users in
+            return query
+                .with(\.$skills)
+                .with(\.$tools)
+                .range(offset..<(offset + limit))
+                .all()
+                .map { users in
                 users.map { user in
                     let skills = user.skills.compactMap { skill in
                         SkillNames(nameEn: skill.nameEn, primary: true, nameRu: skill.nameRu)
