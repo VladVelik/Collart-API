@@ -2,6 +2,10 @@ import Fluent
 import Vapor
 
 func routes(_ app: Application) throws {
+    
+    let webSocketsService = WebSocketsService.shared
+    webSocketsService.db = app.db
+    
     app.get { req async in
         "It works!"
     }
@@ -27,6 +31,18 @@ func routes(_ app: Application) throws {
     try app.register(collection: SearchController())
     try app.register(collection: MessageController())
     
+    app.webSocket("ws", ":userID") { req, ws in
+        guard let userIDString = req.parameters.get("userID"), let userID = UUID(uuidString: userIDString) else {
+            ws.close(promise: nil)
+            return
+        }
+        
+        WebSocketsService.shared.connect(userID: userID, ws: ws)
+
+        ws.onClose.whenComplete { _ in
+            WebSocketsService.shared.disconnect(userID: userID)
+        }
+    }
 }
 
 func protectedHandler(req: Request) throws -> String {

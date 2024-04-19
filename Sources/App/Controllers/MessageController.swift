@@ -42,6 +42,10 @@ struct MessageController: RouteCollection {
             )
             
             return message.save(on: req.db).map { message }
+                //.flatMap {
+                //WebSocketsService.shared.send(message: message, to: messageData.receiverID)
+               // return req.eventLoop.future(message)
+            //}
         }
     }
     
