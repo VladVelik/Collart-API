@@ -208,11 +208,3 @@ struct UserController: RouteCollection {
         }
     }
 }
-
-struct FileUpload: Codable {
-    var file: File
-}
-
-struct CloudinaryUploadResponse: Codable {
-    let url: String
-}

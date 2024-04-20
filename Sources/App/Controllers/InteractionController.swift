@@ -391,39 +391,3 @@ extension InteractionController {
         }
     }
 }
-
-struct CreateRequest: Content {
-    var senderID: UUID?
-    var orderID: UUID?
-    var getterID: UUID?
-}
-
-extension Interaction {
-    struct Requester: Content {
-        var getterID: UUID
-    }
-    
-    struct Sender: Content {
-        var senderID: UUID
-    }
-    
-    struct FullInteraction: Content {
-        var id: UUID?
-        var sender: UserWithSkillsAndTools
-        var getter: UserWithSkillsAndTools
-        var order: OrderWithUserAndToolsAndSkill
-        var status: Status
-    }
-}
-
-extension Order {
-    struct FullOrder: Content {
-        var id: UUID
-        var title: String
-        var image: String
-        var taskDescription: String
-        var projectDescription: String
-        var skills: Skill?
-        var tools: [Tool]
-    }
-}

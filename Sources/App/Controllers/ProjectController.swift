@@ -171,17 +171,3 @@ struct ProjectController: RouteCollection {
     }
 
 }
-
-struct PortfolioProjectCreateRequest: Content {
-    var name: String
-    var image: File
-    var description: String
-    var files: [File]
-}
-
-struct PortfolioProjectUpdateRequest: Content {
-    var name: String?
-    var image: File?
-    var description: String?
-    var files: [File]?
-}

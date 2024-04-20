@@ -41,11 +41,10 @@ struct MessageController: RouteCollection {
                 isRead: false
             )
             
-            return message.save(on: req.db).map { message }
-                //.flatMap {
-                //WebSocketsService.shared.send(message: message, to: messageData.receiverID)
-               // return req.eventLoop.future(message)
-            //}
+            return message.save(on: req.db).flatMap {
+                WebSocketsService.shared.send(message: message, to: messageData.receiverID)
+                return req.eventLoop.future(message)
+            }
         }
     }
     
@@ -180,33 +179,4 @@ struct MessageController: RouteCollection {
                 message.delete(on: req.db)
             }.transform(to: .ok)
     }
-}
-
-extension Message {
-    struct CreateRequest: Content {
-        var senderID: UUID
-        var receiverID: UUID
-        var message: String
-        var files: [File]?
-        var createdAt: Date?
-        var updatedAt: Date?
-        var isRead: Bool
-    }
-}
-
-struct FetchMessagesRequest: Content {
-    var senderID: UUID
-    var receiverID: UUID
-    var offset: Int?
-    var limit: Int?
-}
-
-struct ChatPreview: Content {
-    var userID: UUID
-    var userName: String
-    var userPhotoURL: String
-    var lastMessage: String
-    var unreadMessagesCount: Int
-    var messageTime: Date
-    var isRead: Bool
 }

@@ -142,14 +142,3 @@ struct AuthController: RouteCollection {
             }
     }
 }
-
-struct SkillNames: Content {
-    var nameEn: String
-    var primary: Bool
-    var nameRu: String
-}
-struct UserWithSkillsAndTools: Content {
-    let user: User.Public
-    let skills: [SkillNames]
-    let tools: [String]
-}

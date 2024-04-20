@@ -156,8 +156,3 @@ struct ToolController: RouteCollection {
 
 
 }
-
-struct UserToolData: Content {
-    let userID: UUID
-    let toolID: UUID
-}
