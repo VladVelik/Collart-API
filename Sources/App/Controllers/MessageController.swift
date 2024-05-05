@@ -124,18 +124,10 @@ struct MessageController: RouteCollection {
         let params = try req.content.decode(FetchMessagesRequest.self)
         
         var query = Message.query(on: req.db)
-            .group(.or) { or in
-                or.group(.and) { and in
-                    and.filter(\.$sender.$id == params.senderID)
-                    and.filter(\.$receiver.$id == params.receiverID)
-                }
-                or.group(.and) { and in
-                    and.filter(\.$sender.$id == params.receiverID)
-                    and.filter(\.$receiver.$id == params.senderID)
-                }
-            }
+            .filter(\.$sender.$id == params.senderID)
+            .filter(\.$receiver.$id == params.receiverID)
             .filter(\.$isRead == false)
-
+        
         if let offset = params.offset {
             query = query.range((params.offset ?? 0)..<((params.offset ?? 0) + (params.limit ?? 100)))
         }
