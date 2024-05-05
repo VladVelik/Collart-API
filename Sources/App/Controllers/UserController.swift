@@ -137,15 +137,12 @@ struct UserController: RouteCollection {
         // Извлекаем идентификатор пользователя из токена
         let userID = try req.auth.require(User.self).requireID()
 
-        // Запрашиваем все UserSkill для этого пользователя
         return UserSkill.query(on: req.db)
             .filter(\.$user.$id == userID)
             .all()
             .flatMap { userSkills in
-                // Извлекаем идентификаторы навыков из UserSkill
                 let skillIDs = userSkills.map { $0.$skill.id }
 
-                // Запрашиваем навыки по этим идентификаторам
                 return Skill.query(on: req.db)
                     .filter(\.$id ~~ skillIDs)
                     .all()
@@ -155,56 +152,178 @@ struct UserController: RouteCollection {
     func updateUser(req: Request) throws -> EventLoopFuture<HTTPStatus> {
         let userID = try req.auth.require(User.self).requireID()
         let updateUserRequest = try req.content.decode(UpdateUserRequest.self)
-
+        
         return req.db.transaction { db in
-            User.find(userID, on: db)
-                .unwrap(or: Abort(.notFound))
-                .flatMap { user in
-                    var updateLogin = false
+            self.updateUserDetails(userID: userID, updateUserRequest: updateUserRequest, db: db, req: req)
+        }
+    }
+}
 
-                    if let email = updateUserRequest.email, !email.isEmpty {
-                        user.email = email
-                        updateLogin = true
+
+// MARK: - Private methods
+extension UserController {
+    private func updateUserDetails(userID: UUID, updateUserRequest: UpdateUserRequest, db: Database, req: Request) -> EventLoopFuture<HTTPStatus> {
+        User.find(userID, on: db)
+            .unwrap(or: Abort(.notFound))
+            .flatMap { user in
+                self.updateUserImages(user: user, updateUserRequest: updateUserRequest, req: req)
+                    .flatMap {
+                        self.applyUserUpdates(user: user, updateUserRequest: updateUserRequest)
+                        return user.save(on: db)
                     }
-                    if let name = updateUserRequest.name, !name.isEmpty { user.name = name }
-                    if let surname = updateUserRequest.surname, !surname.isEmpty { user.surname = surname }
-                    if let description = updateUserRequest.description, !description.isEmpty { user.description = description }
-                    if let searchable = updateUserRequest.searchable { user.searchable = searchable }
-                    if let experience = updateUserRequest.experience { user.experience = experience }
-
-                    return user.save(on: db).flatMap {
-                        if updateLogin {
-                            return AuthCredential.query(on: db)
-                                .filter(\.$user.$id == userID)
-                                .first()
-                                .unwrap(or: Abort(.notFound))
-                                .flatMap { authCredential in
-                                    authCredential.login = user.email
-                                    return authCredential.save(on: db)
-                                }
-                        } else {
-                            return db.eventLoop.makeSucceededFuture(())
-                        }
-                    }.flatMap {
-                        if let password = updateUserRequest.passwordHash, let confirmPassword = updateUserRequest.confirmPasswordHash, !password.isEmpty, password == confirmPassword {
-                            return AuthCredential.query(on: db)
-                                .filter(\.$user.$id == userID)
-                                .first()
-                                .unwrap(or: Abort(.notFound))
-                                .flatMap { authCredential in
-                                    do {
-                                        let hashedPassword = try Bcrypt.hash(password)
-                                        authCredential.passwordHash = hashedPassword
-                                        return authCredential.save(on: db).transform(to: .ok)
-                                    } catch {
-                                        return db.eventLoop.makeFailedFuture(Abort(.internalServerError, reason: "Failed to hash password"))
-                                    }
-                                }
-                        } else {
-                            return db.eventLoop.makeSucceededFuture(.ok)
-                        }
+                    .flatMap {
+                        self.updateAuthCredentialIfNeeded(user: user, updateUserRequest: updateUserRequest, db: db)
+                    }
+                    .flatMap {
+                        self.updatePasswordIfNeeded(user: user, updateUserRequest: updateUserRequest, db: db)
+                    }
+                    .flatMap { _ in
+                        self.updateUserSkillsAndToolsIfNeeded(user: user, updateUserRequest: updateUserRequest, db: db)
+                    }
+            }
+    }
+    
+    private func applyUserUpdates(user: User, updateUserRequest: UpdateUserRequest) {
+        var updateLogin = false
+        
+        if let email = updateUserRequest.email, !email.isEmpty {
+            user.email = email
+            updateLogin = true
+        }
+        if let name = updateUserRequest.name, !name.isEmpty { user.name = name }
+        if let surname = updateUserRequest.surname, !surname.isEmpty { user.surname = surname }
+        if let description = updateUserRequest.description, !description.isEmpty { user.description = description }
+        if let searchable = updateUserRequest.searchable { user.searchable = searchable }
+        if let experience = updateUserRequest.experience { user.experience = experience }
+    }
+    
+    private func updateAuthCredentialIfNeeded(user: User, updateUserRequest: UpdateUserRequest, db: Database) -> EventLoopFuture<Void> {
+        if updateUserRequest.email != nil && !updateUserRequest.email!.isEmpty {
+            return AuthCredential.query(on: db)
+                .filter(\.$user.$id == user.id ?? UUID())
+                .first()
+                .unwrap(or: Abort(.notFound))
+                .flatMap { authCredential in
+                    authCredential.login = user.email
+                    return authCredential.save(on: db)
+                }
+        } else {
+            return db.eventLoop.makeSucceededFuture(())
+        }
+    }
+    
+    private func updatePasswordIfNeeded(user: User, updateUserRequest: UpdateUserRequest, db: Database) -> EventLoopFuture<HTTPStatus> {
+        if let password = updateUserRequest.passwordHash, 
+            let confirmPassword = updateUserRequest.confirmPasswordHash,
+            !password.isEmpty, password == confirmPassword {
+            return AuthCredential.query(on: db)
+                .filter(\.$user.$id == user.id ?? UUID())
+                .first()
+                .unwrap(or: Abort(.notFound))
+                .flatMap { authCredential in
+                    do {
+                        let hashedPassword = try Bcrypt.hash(password)
+                        authCredential.passwordHash = hashedPassword
+                        return authCredential.save(on: db).transform(to: .ok)
+                    } catch {
+                        return db.eventLoop.makeFailedFuture(Abort(.internalServerError, reason: "Failed to hash password"))
                     }
                 }
+        } else {
+            return db.eventLoop.makeSucceededFuture(.ok)
         }
+    }
+    
+    private func updateUserSkillsAndToolsIfNeeded(user: User, updateUserRequest: UpdateUserRequest, db: Database) -> EventLoopFuture<HTTPStatus> {
+        let skillUpdateFuture: EventLoopFuture<Void>
+        
+        if let skills = updateUserRequest.skills {
+            skillUpdateFuture = UserSkill.query(on: db)
+                .filter(\.$user.$id == user.id!)
+                .delete()
+                .flatMap {
+                    Skill.query(on: db)
+                        .group(.or) { or in
+                            or.filter(\.$nameRu ~~ skills)
+                            or.filter(\.$nameEn ~~ skills)
+                        }
+                        .all()
+                        .flatMap { fetchedSkills in
+                            var isFirst = true
+                            let userSkills = fetchedSkills.map { skill -> EventLoopFuture<Void> in
+                                let isPrimary = isFirst
+                                isFirst = false
+                                let userSkill = UserSkill(primary: isPrimary, userID: user.id!, skillID: skill.id!)
+                                return userSkill.save(on: db)
+                            }
+                            return EventLoopFuture<Void>.andAllSucceed(userSkills, on: db.eventLoop)
+                        }
+                }
+        } else {
+            skillUpdateFuture = db.eventLoop.makeSucceededFuture(())
+        }
+
+        let toolUpdateFuture: EventLoopFuture<Void>
+        
+        if let tools = updateUserRequest.tools {
+            toolUpdateFuture = UserTool.query(on: db)
+                .filter(\.$user.$id == user.id!)
+                .delete()
+                .flatMap {
+                    Tool.query(on: db)
+                        .filter(\.$name ~~ tools)
+                        .all()
+                        .flatMap { fetchedTools in
+                            let userTools = fetchedTools.map { tool -> EventLoopFuture<Void> in
+                                let userTool = UserTool(userID: user.id!, toolID: tool.id!)
+                                return userTool.save(on: db)
+                            }
+                            return EventLoopFuture<Void>.andAllSucceed(userTools, on: db.eventLoop)
+                        }
+                }
+        } else {
+            toolUpdateFuture = db.eventLoop.makeSucceededFuture(())
+        }
+
+        return skillUpdateFuture.and(toolUpdateFuture).transform(to: .ok)
+    }
+    
+    private func updateUserImages(user: User, updateUserRequest: UpdateUserRequest, req: Request) -> EventLoopFuture<Void> {
+        var deleteFutures: [EventLoopFuture<Void>] = []
+
+        if let newPhoto = updateUserRequest.image {
+            do {
+                let deleteOldPhotoFuture = try CloudinaryService.shared.delete(publicId: extractResourceName(from: user.userPhoto) ?? "", on: req)
+                deleteFutures.append(deleteOldPhotoFuture)
+
+                let uploadNewPhotoFuture = try CloudinaryService.shared.upload(file: newPhoto, on: req).map { newPhotoUrl in
+                    user.userPhoto = newPhotoUrl
+                }
+                deleteFutures.append(uploadNewPhotoFuture)
+            } catch {
+                return req.eventLoop.makeFailedFuture(error)
+            }
+        }
+
+        if let newCover = updateUserRequest.cover {
+            do {
+                let deleteOldCoverFuture = try CloudinaryService.shared.delete(publicId: extractResourceName(from: user.cover) ?? "", on: req)
+                deleteFutures.append(deleteOldCoverFuture)
+
+                let uploadNewCoverFuture = try CloudinaryService.shared.upload(file: newCover, on: req).map { newCoverUrl in
+                    user.cover = newCoverUrl
+                }
+                deleteFutures.append(uploadNewCoverFuture)
+            } catch {
+                return req.eventLoop.makeFailedFuture(error)
+            }
+        }
+
+        return EventLoopFuture.andAllSucceed(deleteFutures, on: req.eventLoop)
+    }
+
+
+    private func extractResourceName(from url: String?) -> String? {
+        return url?.components(separatedBy: "/").last?.components(separatedBy: ".").first
     }
 }

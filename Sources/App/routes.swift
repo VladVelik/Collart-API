@@ -46,8 +46,6 @@ func routes(_ app: Application) throws {
 }
 
 func protectedHandler(req: Request) throws -> String {
-    // Этот обработчик будет вызываться только для запросов с действительным JWT
     _ = try req.auth.require(TokenPayload.self)
-    // Используйте данные из payload по мере необходимости
     return "Доступ к защищенному контенту разрешен"
 }

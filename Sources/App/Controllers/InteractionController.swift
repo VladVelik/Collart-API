@@ -1,5 +1,5 @@
 //
-//  File.swift
+//  InteractionController.swift
 //  
 //
 //  Created by Vladislav Sosin on 01.03.2024.
@@ -239,7 +239,7 @@ struct InteractionController: RouteCollection {
                     .flatMap {
                         Interaction.query(on: req.db)
                             .filter(\.$order.$id == interaction.order.id ?? UUID())
-                            .filter(\.$id != interactionID) // Исключаем текущую интеракцию
+                            .filter(\.$id != interactionID)
                             .all()
                             .flatMap { interactions -> EventLoopFuture<Void> in
                                 let deleteFutures = interactions.map { $0.delete(on: req.db) }
@@ -247,13 +247,11 @@ struct InteractionController: RouteCollection {
                             }
                     }
                     .flatMap {
-                        // Добавляем заказ в таб `collaborations` для обоих пользователей
                         let addTabForSender = Tab(userID: interaction.sender.id ?? UUID(), projectID: interaction.order.id ?? UUID(), tabType: .collaborations).save(on: req.db)
                         let addTabForGetter = Tab(userID: interaction.getter.id ?? UUID(), projectID: interaction.order.id ?? UUID(), tabType: .collaborations).save(on: req.db)
                         return addTabForSender.and(addTabForGetter).transform(to: ())
                     }
                     .flatMap {
-                        // Удаляем запись этого ордера из активных табов для обоих пользователей
                         Tab.query(on: req.db)
                             .filter(\.$projectID == interaction.order.id ?? UUID())
                             .filter(\.$tabType == .active)

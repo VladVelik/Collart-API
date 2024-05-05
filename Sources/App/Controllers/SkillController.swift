@@ -1,6 +1,6 @@
 //
-//  File.swift
-//  
+//  SkillController.swift
+//
 //
 //  Created by Vladislav Sosin on 01.03.2024.
 //
@@ -40,7 +40,7 @@ struct SkillController: RouteCollection {
     }
 
     
-    // Get a skill by ID
+    // Получение скилла по айди
     func get(req: Request) throws -> EventLoopFuture<Skill> {
         let skillID = try req.parameters.require("skillID", as: UUID.self)
         return Skill.find(skillID, on: req.db)
@@ -83,7 +83,6 @@ struct SkillController: RouteCollection {
     func delete(req: Request) throws -> EventLoopFuture<HTTPStatus> {
         let skillID = try req.parameters.require("skillID", as: UUID.self)
         
-        // Проверяем, связан ли скилл с каким-либо пользователем
         let isSkillUsedByUser = UserSkill.query(on: req.db)
             .filter(\.$skill.$id == skillID)
             .first()
@@ -93,7 +92,6 @@ struct SkillController: RouteCollection {
                 }
             }
         
-        // Проверяем, связан ли скилл с каким-либо заказом
         let isSkillUsedByOrder = Order.query(on: req.db)
             .filter(\.$skill == skillID)
             .first()
@@ -104,7 +102,6 @@ struct SkillController: RouteCollection {
             }
 
         
-        // Выполняем обе проверки перед удалением скилла
         return isSkillUsedByUser.and(isSkillUsedByOrder).flatMap { _ in
             Skill.find(skillID, on: req.db)
                 .unwrap(or: Abort(.notFound))

@@ -14,6 +14,7 @@ struct AuthController: RouteCollection {
         }
     }
     
+    // Регистрация пользователя.
     func register(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
         let createRequest = try req.content.decode(CreateUserRequest.self)
         
@@ -77,7 +78,7 @@ struct AuthController: RouteCollection {
     }
 
     
-    
+    // Авторизация пользователя.
     func login(_ req: Request) throws -> EventLoopFuture<TokenResponse> {
         let loginRequest = try req.content.decode(LoginRequest.self)
         return AuthCredential.query(on: req.db)
@@ -99,6 +100,7 @@ struct AuthController: RouteCollection {
         return try req.jwt.sign(payload)
     }
     
+    // Получение авторизированного пользователя.
     func getUser(_ req: Request) throws -> EventLoopFuture<UserWithSkillsAndTools> {
         let user = try req.auth.require(User.self)
 

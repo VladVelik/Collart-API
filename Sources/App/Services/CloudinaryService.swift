@@ -32,7 +32,6 @@ struct CloudinaryService {
         var headers = HTTPHeaders()
         headers.add(name: .contentType, value: "multipart/form-data; boundary=\(boundary)")
         
-        // Создание тела запроса
         var body = ByteBufferAllocator().buffer(capacity: 0)
         appendPart(name: "file", filename: file.filename, fileData: file.data, boundary: boundary, to: &body)
         appendPart(name: "api_key", value: apiKey, boundary: boundary, to: &body)
@@ -40,7 +39,6 @@ struct CloudinaryService {
         appendPart(name: "signature", value: signature, boundary: boundary, to: &body)
         body.writeString("--\(boundary)--\r\n")
         
-        // Отправка запроса
         return req.client.post(url, headers: headers) { req in
             req.body = .init(buffer: body)
         }.flatMapThrowing { res in
@@ -87,7 +85,7 @@ struct CloudinaryService {
         let disposition = filename != nil ? "form-data; name=\"\(name)\"; filename=\"\(filename!)\"" : "form-data; name=\"\(name)\""
         let partHeader = "--\(boundary)\r\nContent-Disposition: \(disposition)\r\n\r\n"
         body.writeString(partHeader)
-        var fileData = fileData // Создаем копию, так как writeBuffer принимает inout параметр
+        var fileData = fileData
         body.writeBuffer(&fileData)
         body.writeString("\r\n")
     }

@@ -1,6 +1,6 @@
 //
-//  File.swift
-//  
+//  OrderController.swift
+//
 //
 //  Created by Vladislav Sosin on 24.02.2024.
 //
@@ -35,14 +35,10 @@ struct OrderController: RouteCollection {
             .all()
             .flatMap { orders in
                 let orderDetailsFutures = orders.map { order in
-                    // Получаем инструменты для заказа
                     let toolsFuture = order.$tools.query(on: req.db).all()
-
-                    // Получаем детали скилла, используя ID скилла в заказе
                     let skillFuture = Skill.find(order.skill, on: req.db).unwrap(or: Abort(.notFound))
 
                     return toolsFuture.and(skillFuture).map { tools, skill in
-                        // Создаём SkillNames для скилла
                         let skillNames = SkillOrderNames(nameEn: skill.nameEn, nameRu: skill.nameRu)
                         return OrderWithUserAndToolsAndSkill(order: order, user: order.owner, tools: tools.map { $0.name }, skill: skillNames)
                     }
@@ -160,7 +156,6 @@ struct OrderController: RouteCollection {
                 deleteFutures.append(uploadNewImageFuture)
             }
             
-            // Если предоставлены новые файлы, удалить старые из Cloudinary и загрузить новые
             if let newFiles = updateData.files, !newFiles.isEmpty {
                 let deleteOldFilesFutures = try order.files.map { try CloudinaryService.shared.delete(publicId: extractResourceName(from: $0) ?? "", on: req) }
                 deleteFutures.append(contentsOf: deleteOldFilesFutures)
@@ -179,7 +174,7 @@ struct OrderController: RouteCollection {
             if let dataEnd = updateData.dataEnd { order.dataEnd = dataEnd }
             
             return EventLoopFuture.andAllSucceed(deleteFutures, on: req.eventLoop).flatMap {
-                return order.save(on: req.db) // Сохраняем изменения в order
+                return order.save(on: req.db)
             }.flatMapThrowing {
                 if let tools = updateData.tools {
                     // Удалить старые связи OrderTool
@@ -233,7 +228,6 @@ struct OrderController: RouteCollection {
         let userID = try req.auth.require(User.self).requireID()
         let projectID = try req.parameters.require("orderId", as: UUID.self)
 
-        // Создание записи в Tab с типом TabType.portfolio
         let tab = Tab(userID: userID, projectID: projectID, tabType: .favorite)
 
         return tab.save(on: req.db).transform(to: .created)

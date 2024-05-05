@@ -1,6 +1,6 @@
 //
-//  File.swift
-//  
+//  ProjectController.swift
+//
 //
 //  Created by Vladislav Sosin on 23.02.2024.
 //
@@ -35,6 +35,7 @@ struct ProjectController: RouteCollection {
             .unwrap(or: Abort(.notFound))
     }
     
+    // Обновление проекта портфолио.
     func updatePortfolioProject(req: Request) throws -> EventLoopFuture<HTTPStatus> {
         let projectID = try req.parameters.require("projectId", as: UUID.self)
         let updateData = try req.content.decode(PortfolioProjectUpdateRequest.self)
@@ -42,7 +43,6 @@ struct ProjectController: RouteCollection {
         return PortfolioProject.find(projectID, on: req.db).unwrap(or: Abort(.notFound)).flatMapThrowing { portfolioProject in
             var deleteFutures: [EventLoopFuture<Void>] = []
 
-            // Если предоставлено новое изображение, удалите старое
             if let _ = updateData.image {
                 let oldImageUrl = portfolioProject.image
                 let publicId = extractResourceName(from: oldImageUrl)
@@ -50,7 +50,6 @@ struct ProjectController: RouteCollection {
                 deleteFutures.append(deleteFuture)
             }
             
-            // Если предоставлены новые файлы, удалите старые
             if let newFiles = updateData.files, !newFiles.isEmpty {
                 let deleteFileFutures = try portfolioProject.files.map { oldFileUrl in
                     let publicId = extractResourceName(from: oldFileUrl)
@@ -59,7 +58,6 @@ struct ProjectController: RouteCollection {
                 deleteFutures.append(contentsOf: deleteFileFutures)
             }
 
-            // Сначала удалите старые изображения и файлы
             return EventLoopFuture.andAllSucceed(deleteFutures, on: req.eventLoop).flatMapThrowing {
                 // Загрузка новых изображений и файлов
                 let uploadImageFuture = updateData.image != nil ?
@@ -77,7 +75,6 @@ struct ProjectController: RouteCollection {
                     } : req.eventLoop.makeSucceededFuture(portfolioProject.files)
                 
                 return uploadImageFuture.and(uploadFilesFuture).flatMap { (_, _) in
-                    // Обновление полей проекта, если они предоставлены
                     if let newName = updateData.name {
                         portfolioProject.name = newName
                     }
@@ -85,7 +82,6 @@ struct ProjectController: RouteCollection {
                         portfolioProject.description = newDescription
                     }
                     
-                    // Сохранение обновленного проекта в базе данных
                     return portfolioProject.save(on: req.db)
                 }
             }
@@ -96,9 +92,7 @@ struct ProjectController: RouteCollection {
         let userID = try req.auth.require(User.self).requireID()
         let createRequest = try req.content.decode(PortfolioProjectCreateRequest.self)
         
-        // Сначала загрузите изображение проекта
         return try CloudinaryService.shared.upload(file: createRequest.image, on: req).flatMap { imageUrl in
-            // Затем загрузите все файлы проекта
             let fileUploads = createRequest.files.map { fileData in
                 do {
                     return try CloudinaryService.shared.upload(file: fileData, on: req)
@@ -108,7 +102,6 @@ struct ProjectController: RouteCollection {
             }
             
             return fileUploads.flatten(on: req.eventLoop).flatMap { fileUrls in
-                // Теперь, когда у вас есть все URL-адреса, создайте и сохраните проект портфолио
                 let portfolioProject = PortfolioProject(
                     userID: userID,
                     name: createRequest.name,
@@ -118,7 +111,6 @@ struct ProjectController: RouteCollection {
                 )
                 
                 return portfolioProject.save(on: req.db).flatMap { _ in
-                    // Создайте вкладку типа 'portfolio' для этого проекта
                     guard let projectID = portfolioProject.id else {
                         return req.eventLoop.makeFailedFuture(Abort(.internalServerError, reason: "Failed to save portfolio project"))
                     }
@@ -134,7 +126,6 @@ struct ProjectController: RouteCollection {
         let projectID = try req.parameters.require("projectId", as: UUID.self)
 
         return PortfolioProject.find(projectID, on: req.db).unwrap(or: Abort(.notFound)).flatMapThrowing { portfolioProject in
-            // Собираем все фьючерсы удаления файлов из Cloudinary
             var deleteFutures: [EventLoopFuture<Void>] = []
             
             // Удаление основного изображения проекта, если оно есть
