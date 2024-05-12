@@ -5,9 +5,9 @@ import Foundation
 
 struct CloudinaryService {
     static let shared = CloudinaryService(
-        cloudName: "dwkprbrad",
-        apiKey: "571257446453121",
-        apiSecret: "tgoQJ4AKmlCihUe3t_oImnXTGDM"
+        cloudName: Environment.get("CLOUD_NAME") ?? "cloudname",
+        apiKey: Environment.get("CLOUD_API_KEY") ?? "apiKey",
+        apiSecret: Environment.get("CLOUD_SECRET") ?? "apiSecret"
     )
     
     let cloudName: String

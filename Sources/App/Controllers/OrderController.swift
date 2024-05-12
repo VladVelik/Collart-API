@@ -196,31 +196,16 @@ struct OrderController: RouteCollection {
     
     // Метод для удаления заказа, связанных файлов на Cloudinary и записей в связанных таблицах
     func deleteOrder(req: Request) throws -> EventLoopFuture<HTTPStatus> {
-        let projectID = try req.parameters.require("orderId", as: UUID.self)
+        let orderId = try req.parameters.require("orderId", as: UUID.self)
         
-        // Найти заказ для удаления
-        return Order.find(projectID, on: req.db).unwrap(or: Abort(.notFound)).flatMapThrowing { order in
-            // Удаление изображения заказа с Cloudinary
-            let deleteImageFuture = try CloudinaryService.shared.delete(publicId: extractResourceName(from: order.image) ?? "", on: req)
-            
-            // Удаление файлов заказа с Cloudinary
-            let deleteFilesFutures = try order.files.map { fileUrl in
-                try CloudinaryService.shared.delete(publicId: extractResourceName(from: fileUrl) ?? "", on: req)
-            }.flatten(on: req.eventLoop)
-            
-            let deleteOrderToolFuture = OrderTool.query(on: req.db).filter(\.$order.$id == projectID).delete()
-            let deleteInteractionsFuture = Interaction.query(on: req.db).filter(\.$order.$id == projectID).delete()
-            let deleteOrderParticipantFuture = OrderParticipant.query(on: req.db).filter(\.$order.$id == projectID).delete()
-            let deleteTabsFuture = Tab.query(on: req.db).filter(\.$projectID == projectID).delete()
-            
-            return deleteImageFuture.and(deleteFilesFutures)
-                .and(deleteOrderToolFuture)
-                .and(deleteInteractionsFuture)
-                .and(deleteOrderParticipantFuture)
-                .and(deleteTabsFuture).flatMap { _ in
-                    order.delete(on: req.db)//.transform(to: .ok)
-                }
-        }.transform(to: .ok)
+        return Order.find(orderId, on: req.db).unwrap(or: Abort(.notFound)).flatMap { order in
+            deleteRelatedData(for: order, on: req).flatMap {
+                order.delete(on: req.db)
+            }
+        }.transform(to: .ok).flatMapError { error in
+            req.logger.error("Failed to delete order: \(error.localizedDescription)")
+            return req.eventLoop.makeFailedFuture(error)
+        }
     }
     
     // Добавление проекта в портфолио пользователя
@@ -249,12 +234,40 @@ struct OrderController: RouteCollection {
             }.transform(to: .ok)
     }
 
-    private func extractResourceName(from url: String) -> String? {
+}
+
+
+private extension OrderController {
+    func deleteRelatedData(for order: Order, on req: Request) -> EventLoopFuture<Void> {
+        let orderId = order.id
+
+        let deleteImages = deleteImagesAndFiles(for: order, on: req)
+
+        let deleteOrderTools = OrderTool.query(on: req.db).filter(\.$order.$id == orderId ?? UUID()).delete()
+        let deleteInteractions = Interaction.query(on: req.db).filter(\.$order.$id == orderId ?? UUID()).delete()
+        let deleteOrderParticipants = OrderParticipant.query(on: req.db).filter(\.$order.$id == orderId ?? UUID()).delete()
+        let deleteTabs = Tab.query(on: req.db).filter(\.$projectID == orderId ?? UUID()).delete()
+
+        return deleteImages.and(deleteOrderTools).and(deleteInteractions).and(deleteOrderParticipants).and(deleteTabs).transform(to: ())
+    }
+
+    func deleteImagesAndFiles(for order: Order, on req: Request) -> EventLoopFuture<Void> {
+        let deleteImageFuture: EventLoopFuture<Void> = order.image.isEmpty ? req.eventLoop.makeSucceededFuture(()) :
+            (try? CloudinaryService.shared.delete(publicId: extractResourceName(from: order.image) ?? "", on: req)) ?? req.eventLoop.makeFailedFuture(Abort(.internalServerError, reason: "Failed to delete image"))
+        
+        let deleteFilesFuture: EventLoopFuture<Void> = order.files.isEmpty ? req.eventLoop.makeSucceededFuture(()) :
+            (try? order.files.map { fileUrl in
+                try CloudinaryService.shared.delete(publicId: extractResourceName(from: fileUrl) ?? "", on: req)
+            }.flatten(on: req.eventLoop)) ?? req.eventLoop.makeFailedFuture(Abort(.internalServerError, reason: "Failed to delete one or more files"))
+        
+        return deleteImageFuture.and(deleteFilesFuture).map { _ in () }
+    }
+    
+    func extractResourceName(from url: String) -> String? {
         let components = url.split(separator: "/")
         guard let lastComponent = components.last else { return nil }
         
         let fileName = lastComponent.split(separator: ".").first
         return fileName.map(String.init)
     }
-
 }
