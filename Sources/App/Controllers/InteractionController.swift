@@ -36,14 +36,38 @@ struct InteractionController: RouteCollection {
               let getterID = interactionData.getterID else {
             throw Abort(.badRequest, reason: "Необходимо предоставить senderID, orderID и getterID.")
         }
-
-        let interaction = Interaction(
-            senderID: senderID,
-            orderID: orderID,
-            getterID: getterID,
-            status: .active
-        )
-        return interaction.save(on: req.db).map { interaction }
+        
+        return Interaction.query(on: req.db)
+            .group(.or) { or in
+                or.group(.and) { and in
+                    and.filter(\.$sender.$id == senderID)
+                    and.filter(\.$getter.$id == getterID)
+                    and.filter(\.$order.$id == orderID)
+                }
+                or.group(.and) { and in
+                    and.filter(\.$sender.$id == getterID)
+                    and.filter(\.$getter.$id == senderID)
+                    and.filter(\.$order.$id == orderID)
+                }
+            }
+            .first()
+            .flatMap { existingInteraction in
+                if let interaction = existingInteraction {
+                    if interaction.status == .rejected {
+                        return req.eventLoop.makeFailedFuture(Abort(.badRequest, reason: "Ранее пользователь уже отклонил заявку."))
+                    } else {
+                        return req.eventLoop.makeFailedFuture(Abort(.badRequest, reason: "Взаимодействие уже было создано ранее."))
+                    }
+                }
+                
+                let interaction = Interaction(
+                    senderID: senderID,
+                    orderID: orderID,
+                    getterID: getterID,
+                    status: .active
+                )
+                return interaction.save(on: req.db).map { interaction }
+            }
     }
     
     // Получение интеракции по ID
