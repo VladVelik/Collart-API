@@ -93,12 +93,18 @@ struct ProjectController: RouteCollection {
         let createRequest = try req.content.decode(PortfolioProjectCreateRequest.self)
         
         return try CloudinaryService.shared.upload(file: createRequest.image, on: req).flatMap { imageUrl in
-            let fileUploads = createRequest.files.map { fileData in
-                do {
-                    return try CloudinaryService.shared.upload(file: fileData, on: req)
-                } catch {
-                    return req.eventLoop.makeFailedFuture(error)
+            let fileUploads: [EventLoopFuture<String>]
+            
+            if let files = createRequest.files {
+                fileUploads = files.map { fileData in
+                    do {
+                        return try CloudinaryService.shared.upload(file: fileData, on: req)
+                    } catch {
+                        return req.eventLoop.makeFailedFuture(error)
+                    }
                 }
+            } else {
+                fileUploads = []
             }
             
             return fileUploads.flatten(on: req.eventLoop).flatMap { fileUrls in

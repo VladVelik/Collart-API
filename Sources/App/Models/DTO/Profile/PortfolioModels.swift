@@ -14,7 +14,7 @@ struct PortfolioProjectCreateRequest: Content {
     var name: String
     var image: File
     var description: String
-    var files: [File]
+    var files: [File]?
 }
 
 

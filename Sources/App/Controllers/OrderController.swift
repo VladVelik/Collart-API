@@ -22,6 +22,7 @@ struct OrderController: RouteCollection {
             
             tokenProtected.post("addOrderToFavorite", ":orderId", use: addOrderToFavorite)
             tokenProtected.delete("removeOrderFromFavorite", ":orderId", use: removeOrderFromFavorite)
+            tokenProtected.get("isOrderInFavorites", ":orderId", use: isOrderInFavorites)
         }
     }
     
@@ -233,7 +234,21 @@ struct OrderController: RouteCollection {
                 tab.delete(on: req.db)
             }.transform(to: .ok)
     }
-
+    
+    // Добавлен ли проект в избранное
+    func isOrderInFavorites(req: Request) throws -> EventLoopFuture<Bool> {
+        let userID = try req.auth.require(User.self).requireID()
+        let orderID = try req.parameters.require("orderId", as: UUID.self)
+        
+        return Tab.query(on: req.db)
+            .filter(\.$user.$id == userID)
+            .filter(\.$projectID == orderID)
+            .filter(\.$tabType == .favorite)
+            .first()
+            .map { tab in
+                return tab != nil
+            }
+    }
 }
 
 
@@ -253,11 +268,17 @@ private extension OrderController {
 
     func deleteImagesAndFiles(for order: Order, on req: Request) -> EventLoopFuture<Void> {
         let deleteImageFuture: EventLoopFuture<Void> = order.image.isEmpty ? req.eventLoop.makeSucceededFuture(()) :
-            (try? CloudinaryService.shared.delete(publicId: extractResourceName(from: order.image) ?? "", on: req)) ?? req.eventLoop.makeFailedFuture(Abort(.internalServerError, reason: "Failed to delete image"))
+            (try? CloudinaryService.shared.delete(publicId: extractResourceName(from: order.image) ?? "", on: req).flatMapError { error in
+                req.logger.warning("Failed to delete image from Cloudinary: \(error.localizedDescription)")
+                return req.eventLoop.makeSucceededFuture(())
+            }) ?? req.eventLoop.makeFailedFuture(Abort(.internalServerError, reason: "Failed to delete image"))
         
         let deleteFilesFuture: EventLoopFuture<Void> = order.files.isEmpty ? req.eventLoop.makeSucceededFuture(()) :
             (try? order.files.map { fileUrl in
-                try CloudinaryService.shared.delete(publicId: extractResourceName(from: fileUrl) ?? "", on: req)
+                try CloudinaryService.shared.delete(publicId: extractResourceName(from: fileUrl) ?? "", on: req).flatMapError { error in
+                    req.logger.warning("Failed to delete file from Cloudinary: \(error.localizedDescription)")
+                    return req.eventLoop.makeSucceededFuture(())
+                }
             }.flatten(on: req.eventLoop)) ?? req.eventLoop.makeFailedFuture(Abort(.internalServerError, reason: "Failed to delete one or more files"))
         
         return deleteImageFuture.and(deleteFilesFuture).map { _ in () }
